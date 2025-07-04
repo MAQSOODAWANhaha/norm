@@ -2,442 +2,244 @@
 package builder
 
 import (
-    "fmt"
-    "reflect"
-    "strings"
-    "norm/types"
-    "norm/model"
+	"fmt"
+	"reflect"
+	"strings"
+
+	"norm/model"
+	"norm/types"
+	"norm/validator"
 )
 
 // QueryBuilder 查询构建器接口
 type QueryBuilder interface {
-    // 基本子句
-    Match(pattern string) QueryBuilder
-    OptionalMatch(pattern string) QueryBuilder
-    Create(pattern string) QueryBuilder
-    Merge(pattern string) QueryBuilder
-    Set(assignments ...string) QueryBuilder
-    Delete(nodes ...string) QueryBuilder
-    Remove(properties ...string) QueryBuilder
-    Return(fields ...string) QueryBuilder
-    With(fields ...string) QueryBuilder
-    Where(condition string) QueryBuilder
-    
-    // 排序和限制
-    OrderBy(fields ...string) QueryBuilder
-    OrderByDesc(fields ...string) QueryBuilder
-    Skip(count int) QueryBuilder
-    Limit(count int) QueryBuilder
-    
-    // 高级操作
-    Unwind(expression, alias string) QueryBuilder
-    Call(procedure string, params ...interface{}) QueryBuilder
-    Union(other QueryBuilder) QueryBuilder
-    UnionAll(other QueryBuilder) QueryBuilder
-    
-    // 参数操作
-    SetParameter(key string, value interface{}) QueryBuilder
-    SetParameters(params map[string]interface{}) QueryBuilder
-    
-    // 构建操作
-    Build() (types.QueryResult, error)
-    String() string
-    
-    // 实体操作
-    MatchEntity(entity interface{}) QueryBuilder
-    CreateEntity(entity interface{}) QueryBuilder
-    MergeEntity(entity interface{}) QueryBuilder
-    
-    // 关系操作
-    MatchRelationship(from, to interface{}, relType string) QueryBuilder
-    CreateRelationship(from, to interface{}, relType string, props map[string]interface{}) QueryBuilder
+	// 基本子句
+	Match(pattern string) QueryBuilder
+	OptionalMatch(pattern string) QueryBuilder
+	Create(pattern string) QueryBuilder
+	Merge(pattern string) QueryBuilder
+	Where(condition string) QueryBuilder
+
+	// 表达式支持子句
+	Return(expressions ...interface{}) QueryBuilder
+	With(expressions ...interface{}) QueryBuilder
+
+	// 排序和限制
+	OrderBy(fields ...string) QueryBuilder
+	Skip(count int) QueryBuilder
+	Limit(count int) QueryBuilder
+
+	// 参数操作
+	SetParameter(key string, value interface{}) QueryBuilder
+
+	// 构建操作
+	Build() (types.QueryResult, error)
+	Validate() []types.ValidationError
+
+	// 实体操作
+	MatchEntity(entity interface{}) QueryBuilder
+	CreateEntity(entity interface{}) QueryBuilder
 }
 
 // cypherQueryBuilder 实现 QueryBuilder 接口
 type cypherQueryBuilder struct {
-    clauses       []clause
-    parameters    map[string]interface{}
-    paramCounter  int
-    registry      *model.EntityRegistry
-    labelManager  *model.LabelManager
-}
-
-// clause 表示单个 Cypher 子句
-type clause struct {
-    Type      ClauseType
-    Content   string
-    Modifiers map[string]interface{}
+	clauses      []types.Clause
+	parameters   map[string]interface{}
+	paramCounter int
+	registry     model.Registry
+	validator    validator.QueryValidator
 }
 
 // NewQueryBuilder 创建新的查询构建器
-func NewQueryBuilder(registry *model.EntityRegistry) QueryBuilder {
-    return &cypherQueryBuilder{
-        clauses:      make([]clause, 0),
-        parameters:   make(map[string]interface{}),
-        paramCounter: 0,
-        registry:     registry,
-        labelManager: model.NewLabelManager(registry),
-    }
+func NewQueryBuilder(registry model.Registry) QueryBuilder {
+	return &cypherQueryBuilder{
+		clauses:      make([]types.Clause, 0),
+		parameters:   make(map[string]interface{}),
+		paramCounter: 0,
+		registry:     registry,
+		validator:    validator.NewQueryValidator(true), // strictMode = true
+	}
+}
+
+func (q *cypherQueryBuilder) addClause(clauseType types.ClauseType, content string) QueryBuilder {
+	q.clauses = append(q.clauses, types.Clause{
+		Type:    clauseType,
+		Content: content,
+	})
+	return q
 }
 
 // Match 添加 MATCH 子句
 func (q *cypherQueryBuilder) Match(pattern string) QueryBuilder {
-    q.clauses = append(q.clauses, clause{
-        Type:    MatchClause,
-        Content: pattern,
-    })
-    return q
+	return q.addClause(types.MatchClause, pattern)
 }
 
 // OptionalMatch 添加 OPTIONAL MATCH 子句
 func (q *cypherQueryBuilder) OptionalMatch(pattern string) QueryBuilder {
-    q.clauses = append(q.clauses, clause{
-        Type:    OptionalMatchClause,
-        Content: pattern,
-    })
-    return q
+	return q.addClause(types.OptionalMatchClause, pattern)
 }
 
 // Create 添加 CREATE 子句
 func (q *cypherQueryBuilder) Create(pattern string) QueryBuilder {
-    q.clauses = append(q.clauses, clause{
-        Type:    CreateClause,
-        Content: pattern,
-    })
-    return q
+	return q.addClause(types.CreateClause, pattern)
 }
 
 // Merge 添加 MERGE 子句
 func (q *cypherQueryBuilder) Merge(pattern string) QueryBuilder {
-    q.clauses = append(q.clauses, clause{
-        Type:    MergeClause,
-        Content: pattern,
-    })
-    return q
+	return q.addClause(types.MergeClause, pattern)
 }
 
 // Where 添加 WHERE 子句
 func (q *cypherQueryBuilder) Where(condition string) QueryBuilder {
-    q.clauses = append(q.clauses, clause{
-        Type:    WhereClause,
-        Content: condition,
-    })
-    return q
+	return q.addClause(types.WhereClause, condition)
 }
 
 // Return 添加 RETURN 子句
-func (q *cypherQueryBuilder) Return(fields ...string) QueryBuilder {
-    content := strings.Join(fields, ", ")
-    q.clauses = append(q.clauses, clause{
-        Type:    ReturnClause,
-        Content: content,
-    })
-    return q
+func (q *cypherQueryBuilder) Return(expressions ...interface{}) QueryBuilder {
+	return q.addClause(types.ReturnClause, q.formatExpressions(expressions...))
 }
 
 // With 添加 WITH 子句
-func (q *cypherQueryBuilder) With(fields ...string) QueryBuilder {
-    content := strings.Join(fields, ", ")
-    q.clauses = append(q.clauses, clause{
-        Type:    WithClause,
-        Content: content,
-    })
-    return q
-}
-
-// Set 添加 SET 子句
-func (q *cypherQueryBuilder) Set(assignments ...string) QueryBuilder {
-    content := strings.Join(assignments, ", ")
-    q.clauses = append(q.clauses, clause{
-        Type:    SetClause,
-        Content: content,
-    })
-    return q
-}
-
-// Delete 添加 DELETE 子句
-func (q *cypherQueryBuilder) Delete(nodes ...string) QueryBuilder {
-    content := strings.Join(nodes, ", ")
-    q.clauses = append(q.clauses, clause{
-        Type:    DeleteClause,
-        Content: content,
-    })
-    return q
-}
-
-// Remove 添加 REMOVE 子句
-func (q *cypherQueryBuilder) Remove(properties ...string) QueryBuilder {
-    content := strings.Join(properties, ", ")
-    q.clauses = append(q.clauses, clause{
-        Type:    RemoveClause,
-        Content: content,
-    })
-    return q
+func (q *cypherQueryBuilder) With(expressions ...interface{}) QueryBuilder {
+	return q.addClause(types.WithClause, q.formatExpressions(expressions...))
 }
 
 // OrderBy 添加 ORDER BY 子句
 func (q *cypherQueryBuilder) OrderBy(fields ...string) QueryBuilder {
-    content := strings.Join(fields, ", ")
-    q.clauses = append(q.clauses, clause{
-        Type:    OrderByClause,
-        Content: content,
-    })
-    return q
-}
-
-// OrderByDesc 添加 ORDER BY DESC 子句
-func (q *cypherQueryBuilder) OrderByDesc(fields ...string) QueryBuilder {
-    fieldList := make([]string, len(fields))
-    for i, field := range fields {
-        fieldList[i] = field + " DESC"
-    }
-    content := strings.Join(fieldList, ", ")
-    q.clauses = append(q.clauses, clause{
-        Type:    OrderByClause,
-        Content: content,
-    })
-    return q
+	return q.addClause(types.OrderByClause, strings.Join(fields, ", "))
 }
 
 // Skip 添加 SKIP 子句
 func (q *cypherQueryBuilder) Skip(count int) QueryBuilder {
-    q.clauses = append(q.clauses, clause{
-        Type:    SkipClause,
-        Content: fmt.Sprintf("%d", count),
-    })
-    return q
+	return q.addClause(types.SkipClause, fmt.Sprintf("%d", count))
 }
 
 // Limit 添加 LIMIT 子句
 func (q *cypherQueryBuilder) Limit(count int) QueryBuilder {
-    q.clauses = append(q.clauses, clause{
-        Type:    LimitClause,
-        Content: fmt.Sprintf("%d", count),
-    })
-    return q
-}
-
-// Unwind 添加 UNWIND 子句
-func (q *cypherQueryBuilder) Unwind(expression, alias string) QueryBuilder {
-    content := fmt.Sprintf("%s AS %s", expression, alias)
-    q.clauses = append(q.clauses, clause{
-        Type:    UnwindClause,
-        Content: content,
-    })
-    return q
-}
-
-// Call 添加 CALL 子句
-func (q *cypherQueryBuilder) Call(procedure string, params ...interface{}) QueryBuilder {
-    content := procedure
-    if len(params) > 0 {
-        paramStrs := make([]string, len(params))
-        for i, param := range params {
-            paramName := q.generateParameterName()
-            paramStrs[i] = "$" + paramName
-            q.parameters[paramName] = param
-        }
-        content += "(" + strings.Join(paramStrs, ", ") + ")"
-    }
-    
-    q.clauses = append(q.clauses, clause{
-        Type:    CallClause,
-        Content: content,
-    })
-    return q
-}
-
-// Union 添加 UNION 子句
-func (q *cypherQueryBuilder) Union(other QueryBuilder) QueryBuilder {
-    otherResult, _ := other.Build()
-    q.clauses = append(q.clauses, clause{
-        Type:    UnionClause,
-        Content: "",
-    })
-    
-    // 添加其他查询的子句
-    q.clauses = append(q.clauses, clause{
-        Type:    "",
-        Content: otherResult.Query,
-    })
-    
-    // 合并参数
-    for k, v := range otherResult.Parameters {
-        q.parameters[k] = v
-    }
-    
-    return q
-}
-
-// UnionAll 添加 UNION ALL 子句
-func (q *cypherQueryBuilder) UnionAll(other QueryBuilder) QueryBuilder {
-    otherResult, _ := other.Build()
-    q.clauses = append(q.clauses, clause{
-        Type:    UnionAllClause,
-        Content: "",
-    })
-    
-    // 添加其他查询的子句
-    q.clauses = append(q.clauses, clause{
-        Type:    "",
-        Content: otherResult.Query,
-    })
-    
-    // 合并参数
-    for k, v := range otherResult.Parameters {
-        q.parameters[k] = v
-    }
-    
-    return q
+	return q.addClause(types.LimitClause, fmt.Sprintf("%d", count))
 }
 
 // SetParameter 设置查询参数
 func (q *cypherQueryBuilder) SetParameter(key string, value interface{}) QueryBuilder {
-    q.parameters[key] = value
-    return q
-}
-
-// SetParameters 设置多个查询参数
-func (q *cypherQueryBuilder) SetParameters(params map[string]interface{}) QueryBuilder {
-    for k, v := range params {
-        q.parameters[k] = v
-    }
-    return q
+	q.parameters[key] = value
+	return q
 }
 
 // MatchEntity 匹配实体
 func (q *cypherQueryBuilder) MatchEntity(entity interface{}) QueryBuilder {
-    pattern, err := q.buildEntityPattern(entity, "")
-    if err != nil {
-        // 在实际实现中应该返回错误
-        return q
-    }
-    return q.Match(pattern)
+	pattern, err := q.buildEntityPattern(entity, "")
+	if err != nil {
+		// 错误处理将在第二阶段完善
+		return q
+	}
+	return q.Match(pattern)
 }
 
 // CreateEntity 创建实体
 func (q *cypherQueryBuilder) CreateEntity(entity interface{}) QueryBuilder {
-    pattern, err := q.buildEntityPattern(entity, "")
-    if err != nil {
-        return q
-    }
-    return q.Create(pattern)
-}
-
-// MergeEntity 合并实体
-func (q *cypherQueryBuilder) MergeEntity(entity interface{}) QueryBuilder {
-    pattern, err := q.buildEntityPattern(entity, "")
-    if err != nil {
-        return q
-    }
-    return q.Merge(pattern)
-}
-
-// MatchRelationship 匹配关系
-func (q *cypherQueryBuilder) MatchRelationship(from, to interface{}, relType string) QueryBuilder {
-    fromPattern, _ := q.buildEntityPattern(from, "from")
-    toPattern, _ := q.buildEntityPattern(to, "to")
-    
-    relBuilder := NewRelationshipBuilder().Type(relType).Direction(DirectionOutgoing)
-    relPattern := relBuilder.Build()
-    
-    fullPattern := fromPattern + relPattern + toPattern
-    return q.Match(fullPattern)
-}
-
-// CreateRelationship 创建关系
-func (q *cypherQueryBuilder) CreateRelationship(from, to interface{}, relType string, props map[string]interface{}) QueryBuilder {
-    fromPattern, _ := q.buildEntityPattern(from, "from")
-    toPattern, _ := q.buildEntityPattern(to, "to")
-    
-    relBuilder := NewRelationshipBuilder().Type(relType).Direction(DirectionOutgoing)
-    if props != nil {
-        relBuilder = relBuilder.Properties(props)
-    }
-    relPattern := relBuilder.Build()
-    
-    fullPattern := fromPattern + relPattern + toPattern
-    return q.Create(fullPattern)
+	pattern, err := q.buildEntityPattern(entity, "")
+	if err != nil {
+		// 错误处理将在第二阶段完善
+		return q
+	}
+	return q.Create(pattern)
 }
 
 // buildEntityPattern 构建实体模式
 func (q *cypherQueryBuilder) buildEntityPattern(entity interface{}, variable string) (string, error) {
-    t := reflect.TypeOf(entity)
-    if t.Kind() == reflect.Ptr {
-        t = t.Elem()
-    }
-    
-    metadata, exists := q.registry.GetByType(t)
-    if !exists {
-        return "", fmt.Errorf("entity %s not registered", t.Name())
-    }
-    
-    // 构建节点模式
-    nodeBuilder := NewNodeBuilder()
-    
-    if variable != "" {
-        nodeBuilder = nodeBuilder.Variable(variable)
-    }
-    
-    nodeBuilder = nodeBuilder.Labels(metadata.Labels...)
-    
-    // 添加属性
-    v := reflect.ValueOf(entity)
-    if v.Kind() == reflect.Ptr {
-        v = v.Elem()
-    }
-    
-    properties := make(map[string]interface{})
-    for fieldName, propMeta := range metadata.Properties {
-        fieldValue := v.FieldByName(fieldName)
-        if fieldValue.IsValid() && !fieldValue.IsZero() {
-            paramName := q.generateParameterName()
-            properties[propMeta.CypherName] = fmt.Sprintf("$%s", paramName)
-            q.parameters[paramName] = fieldValue.Interface()
-        }
-    }
-    
-    if len(properties) > 0 {
-        nodeBuilder = nodeBuilder.Properties(properties)
-    }
-    
-    return nodeBuilder.Build(), nil
+	t := reflect.TypeOf(entity)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	metadata, exists := q.registry.GetByType(t)
+	if !exists {
+		return "", fmt.Errorf("entity %s not registered", t.Name())
+	}
+
+	nodeBuilder := NewNodeBuilder()
+	if variable != "" {
+		nodeBuilder = nodeBuilder.Variable(variable)
+	}
+	nodeBuilder = nodeBuilder.Labels(metadata.Labels...)
+
+	v := reflect.ValueOf(entity)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	properties := make(map[string]interface{})
+	for fieldName, propMeta := range metadata.Properties {
+		fieldValue := v.FieldByName(fieldName)
+		if fieldValue.IsValid() && !fieldValue.IsZero() {
+			paramName := q.generateParameterName(propMeta.CypherName)
+			properties[propMeta.CypherName] = fmt.Sprintf("$"+"%s", paramName)
+			q.parameters[paramName] = fieldValue.Interface()
+		}
+	}
+
+	if len(properties) > 0 {
+		nodeBuilder = nodeBuilder.Properties(properties)
+	}
+
+	return nodeBuilder.Build(), nil
 }
 
 // generateParameterName 生成参数名
-func (q *cypherQueryBuilder) generateParameterName() string {
-    q.paramCounter++
-    return fmt.Sprintf("param_%d", q.paramCounter)
+func (q *cypherQueryBuilder) generateParameterName(base string) string {
+	q.paramCounter++
+	return fmt.Sprintf("%s_%d", base, q.paramCounter)
+}
+
+// formatExpressions 格式化表达式
+func (q *cypherQueryBuilder) formatExpressions(expressions ...interface{}) string {
+	var parts []string
+	for _, expr := range expressions {
+		switch v := expr.(type) {
+		case string:
+			parts = append(parts, v)
+		case Expression:
+			parts = append(parts, v.String())
+		default:
+			parts = append(parts, fmt.Sprintf("%v", v))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // Build 构建最终的 Cypher 查询
 func (q *cypherQueryBuilder) Build() (types.QueryResult, error) {
-    var parts []string
-    
-    for _, clause := range q.clauses {
-        part := string(clause.Type)
-        if clause.Content != "" {
-            if part != "" {
-                part += " " + clause.Content
-            } else {
-                part = clause.Content
-            }
-        }
-        if part != "" {
-            parts = append(parts, part)
-        }
-    }
-    
-    query := strings.Join(parts, "\n")
-    
-    return types.QueryResult{
-        Query:      query,
-        Parameters: q.parameters,
-    }, nil
+	var parts []string
+	for _, clause := range q.clauses {
+		part := string(clause.Type)
+		if clause.Content != "" {
+			part += " " + clause.Content
+		}
+		parts = append(parts, part)
+	}
+
+	query := strings.Join(parts, "\n")
+	errors := q.Validate()
+
+	return types.QueryResult{
+		Query:      query,
+		Parameters: q.parameters,
+		Valid:      len(errors) == 0,
+		Errors:     errors,
+	}, nil
 }
 
-// String 返回查询字符串表示
-func (q *cypherQueryBuilder) String() string {
-    result, _ := q.Build()
-    return result.Query
+// Validate 验证查询
+func (q *cypherQueryBuilder) Validate() []types.ValidationError {
+	var parts []string
+	for _, clause := range q.clauses {
+		part := string(clause.Type)
+		if clause.Content != "" {
+			part += " " + clause.Content
+		}
+		parts = append(parts, part)
+	}
+	query := strings.Join(parts, "\n")
+
+	return q.validator.Validate(query)
 }

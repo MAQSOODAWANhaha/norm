@@ -108,10 +108,12 @@ norm/
 type QueryBuilder interface {
     // 基本子句
     Match(pattern string) QueryBuilder
+    OptionalMatch(pattern string) QueryBuilder
     Create(pattern string) QueryBuilder
     Merge(pattern string) QueryBuilder
     Where(condition string) QueryBuilder
-    Return(fields ...string) QueryBuilder
+    Return(expressions ...interface{}) QueryBuilder
+    With(expressions ...interface{}) QueryBuilder
     
     // 排序和限制
     OrderBy(fields ...string) QueryBuilder
@@ -123,12 +125,15 @@ type QueryBuilder interface {
     
     // 构建操作
     Build() (QueryResult, error)
-    Validate() error  // 第二阶段功能
+    Validate() []ValidationError
     
     // 实体操作
     MatchEntity(entity interface{}) QueryBuilder
     CreateEntity(entity interface{}) QueryBuilder
 }
+
+// As a helper for aliasing
+func As(expression, alias string) interface{}
 ```
 
 ### 模型注册接口
