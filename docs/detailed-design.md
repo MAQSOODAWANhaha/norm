@@ -17,94 +17,78 @@
 ## 查询构建器系统
 // ... (内容保持不变)
 
-## 模型管理系统
+## 简化实体解析系统
 
-### 实体注册表
+### 核心设计原则
 
-The model management system will be enhanced to support a more powerful and flexible struct tag parsing mechanism. This allows for more declarative configuration of entities.
+我们移除了复杂的实体注册表和预注册机制，改为直接从结构体实例进行实时解析。这大大简化了使用方式：
 
-### 标签（Tag）解析
+**新的设计优势:**
+- 无需预注册实体类型
+- 直接从结构体标签提取信息
+- 运行时反射解析
+- 更简洁的 API
 
-A new, dedicated tag parser will be introduced to handle complex tag definitions. The `cypher` tag will support a key-value format.
+### 标签格式
 
-**Tag Format:**
-
-`cypher:"[<property_name>];[<key1>:<value1>];[<key2>:<value2>]..."`
-
-*   **`property_name`**: (Optional) The first part of the tag, which defines the property name in the database. If omitted, the lowercase field name is used.
-*   **`key:value` pairs**: Semicolon-separated pairs for options.
-
-**Supported Tag Options:**
-
-*   `label`: Specifies the node label. Can be a comma-separated list for multiple labels.
-*   `unique`: Marks the property as unique (`true` or `false`).
-*   `index`: Marks the property for indexing (`true` or `false`).
-*   `omitempty`: Omits the field if it has a zero value.
-
-### `model/registry.go`
-
-The `extractMetadata` function will be updated to use the new tag parser.
+**支持的标签格式:**
 
 ```go
-// model/registry.go
-
-// ...
-
-// extractMetadata 从反射类型中提取元数据
-func (er *entityRegistry) extractMetadata(t reflect.Type) (*EntityMetadata, error) {
-    metadata := &EntityMetadata{
-        Type:          t,
-        Name:          t.Name(),
-        Properties:    make(map[string]*PropertyMetadata),
-        Relationships: make(map[string]*RelationshipMetadata),
-    }
-
-    // New label extraction logic
-    labels, err := er.extractLabels(t)
-    if err != nil {
-        return nil, err
-    }
-    metadata.Labels = labels
-
-    for i := 0; i < t.NumField(); i++ {
-        field := t.Field(i)
-        // ...
-        // Updated property extraction logic using the new tag parser
-        prop, err := er.extractProperty(field)
-        // ...
-    }
-    return metadata, nil
-}
-
-// extractLabels will now parse the 'cypher' tag on the struct itself (if present)
-// or on a dedicated field to determine the label.
-func (er *entityRegistry) extractLabels(t reflect.Type) ([]string, error) {
-    // ... implementation using the new tag parser ...
+type User struct {
+    _        struct{} `cypher:"label:User,VIP"`     // 指定节点标签
+    ID       int64    `cypher:"id,omitempty"`       // 属性映射，空值忽略
+    Username string   `cypher:"username"`           // 简单属性映射
+    Email    string   `cypher:"email"`              
+    Active   bool     `cypher:"active"`             
 }
 ```
 
-### `model/tag.go`
+**标签选项说明:**
+- `label:Label1,Label2` - 指定多个节点标签
+- `omitempty` - 零值时忽略该字段
+- 第一部分为属性名，省略时使用字段名小写
 
-A new file to house the tag parsing logic.
+### 核心实现
+
+#### `builder/entity.go`
 
 ```go
-// model/tag.go
-package model
-
-import (
-    "strings"
-)
-
-// TagInfo holds parsed tag data
-type TagInfo struct {
-    Name    string
-    Options map[string]string
+// EntityInfo 包含从实体中解析出的信息
+type EntityInfo struct {
+    Labels     []string                   // 节点标签
+    Properties map[string]interface{}     // 属性键值对
 }
 
-// ParseTag parses a struct tag string
-func ParseTag(tag string) TagInfo {
-    // ... implementation ...
+// ParseEntity 直接从结构体实例解析标签和属性信息
+func ParseEntity(entity interface{}) (*EntityInfo, error) {
+    // 实时解析，无需预注册
+    // 支持指针和值类型
+    // 自动类型转换
+    // 处理 omitempty 选项
 }
+```
+
+#### 使用示例
+
+```go
+// 1. 定义实体
+type User struct {
+    _        struct{} `cypher:"label:User,Person"`
+    Username string   `cypher:"username"`
+    Email    string   `cypher:"email"`
+    Active   bool     `cypher:"active"`
+}
+
+// 2. 直接使用，无需注册
+user := User{Username: "john", Email: "john@example.com", Active: true}
+
+qb := builder.NewQueryBuilder()  // 无需传入注册表
+result, _ := qb.
+    CreateEntity(user).
+    Return("u").
+    Build()
+
+// 生成: CREATE (:User:Person{username: $username_1, email: $email_2, active: $active_3})
 ```
 
 ## 类型转换系统

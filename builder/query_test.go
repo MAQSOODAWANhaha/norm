@@ -3,13 +3,10 @@ package builder
 
 import (
 	"testing"
-
-	"norm/model"
 )
 
 func TestQueryBuilder_Validation(t *testing.T) {
-	registry := model.NewRegistry()
-	qb := NewQueryBuilder(registry)
+	qb := NewQueryBuilder()
 
 	// Test case 1: Valid query
 	t.Run("Valid Query", func(t *testing.T) {
@@ -28,7 +25,7 @@ func TestQueryBuilder_Validation(t *testing.T) {
 	// Test case 2: Invalid query (bracket mismatch)
 	t.Run("Invalid Query with Mismatched Brackets", func(t *testing.T) {
 		// Create a new builder for a clean state
-		qb2 := NewQueryBuilder(registry)
+		qb2 := NewQueryBuilder()
 		result, err := qb2.Match("(n:Person").Return("n").Build()
 		if err != nil {
 			t.Fatalf("Build failed unexpectedly: %v", err)

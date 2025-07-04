@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"norm/builder"
-	"norm/model"
 	"norm/types"
 )
 
@@ -32,19 +31,12 @@ type Post struct {
 func main() {
 	fmt.Println("=== Cypher ORM Advanced Examples ===")
 
-	// 1. 创建和注册实体
-	registry := model.NewRegistry()
-	entities := []interface{}{User{}, Post{}}
-	for _, entity := range entities {
-		if err := registry.Register(entity); err != nil {
-			log.Fatalf("Failed to register entity: %v", err)
-		}
-	}
-	fmt.Println("✅ All entities registered successfully")
+	// 无需注册实体！直接使用
+	fmt.Println("✅ Using simplified entity parsing")
 
 	// --- 示例 1: 使用 WITH 和别名 ---
 	fmt.Println("\n--- Example 1: Using WITH and Aliases ---")
-	qb1 := builder.NewQueryBuilder(registry)
+	qb1 := builder.NewQueryBuilder()
 	res1, err := qb1.
 		Match("(p:Post)").
 		Where("p.published = true").
@@ -58,7 +50,7 @@ func main() {
 
 	// --- 示例 2: 在 RETURN 中使用别名 ---
 	fmt.Println("\n--- Example 2: Using Aliases in RETURN ---")
-	qb2 := builder.NewQueryBuilder(registry)
+	qb2 := builder.NewQueryBuilder()
 	res2, err := qb2.
 		Match("(u:User)").
 		Where("u.active = true").
@@ -72,7 +64,7 @@ func main() {
 
 	// --- 示例 3: 结合 OptionalMatch ---
 	fmt.Println("\n--- Example 3: Using OptionalMatch ---")
-	qb3 := builder.NewQueryBuilder(registry)
+	qb3 := builder.NewQueryBuilder()
 	res3, err := qb3.
 		Match("(u:User {username: $username})").
 		OptionalMatch("(u)-[:WROTE]->(p:Post)").

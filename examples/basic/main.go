@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"norm/builder"
-	"norm/model"
 	"norm/types"
 )
 
@@ -31,23 +30,14 @@ type Company struct {
 func main() {
 	fmt.Println("=== Cypher ORM Basic Examples with New Tags ===")
 
-	// 1. 创建实体注册表
-	registry := model.NewRegistry()
+	// 无需注册实体！直接使用
 
-	// 2. 注册实体
-	if err := registry.Register(User{}); err != nil {
-		log.Fatalf("Failed to register User entity: %v", err)
-	}
-	if err := registry.Register(Company{}); err != nil {
-		log.Fatalf("Failed to register Company entity: %v", err)
-	}
-	fmt.Println("✅ Entities registered successfully")
-
-	// 检查注册的元数据
-	userMeta, _ := registry.Get("User")
-	fmt.Printf("User labels: %v\n", userMeta.Labels) // 应该输出 [Customer, VIP]
-	companyMeta, _ := registry.Get("Company")
-	fmt.Printf("Company labels: %v\n", companyMeta.Labels) // 应该输出 [Company]
+	// 演示实体解析
+	userInfo, _ := builder.ParseEntity(User{})
+	fmt.Printf("User labels: %v\n", userInfo.Labels) // 应该输出 [Customer, VIP]
+	
+	companyInfo, _ := builder.ParseEntity(Company{})
+	fmt.Printf("Company labels: %v\n", companyInfo.Labels) // 应该输出 [Company]
 
 	// --- 示例 1: 使用自定义标签创建用户 ---
 	fmt.Println("\n--- Example 1: Create User with Custom Labels ---")
@@ -57,7 +47,7 @@ func main() {
 		Active:	   true,
 		CreatedAt: time.Now(),
 	}
-	qb1 := builder.NewQueryBuilder(registry)
+	qb1 := builder.NewQueryBuilder()
 	result1, err := qb1.CreateEntity(user).Return("u").Build()
 	if err != nil {
 		log.Fatalf("Build failed: %v", err)
@@ -66,7 +56,7 @@ func main() {
 
 	// --- 示例 2: 使用默认标签查询公司 ---
 	fmt.Println("\n--- Example 2: Query Company with Default Label ---")
-	qb2 := builder.NewQueryBuilder(registry)
+	qb2 := builder.NewQueryBuilder()
 	result2, err := qb2.
 		Match("(c:Company)").
 		Where("c.name = $name").

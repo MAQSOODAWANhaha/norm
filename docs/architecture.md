@@ -44,11 +44,11 @@
 - **RelationshipBuilder**: 关系模式构建
 - **ClauseBuilder**: Cypher 子句构建
 
-### 2. 模型系统 (Model)
-**目标**: 处理 Go struct 的元数据提取和管理
-- **Registry**: 实体注册和元数据管理
-- **Entity**: 实体定义和标签管理
-- **Property**: 属性映射和验证
+### 2. 实体解析系统 (Entity Parsing)
+**目标**: 直接从 Go struct 实例提取标签和属性信息
+- **EntityParser**: 实时解析结构体标签和属性
+- **LabelExtractor**: 从标签中提取节点标签
+- **PropertyExtractor**: 从字段值中提取属性映射
 
 ### 3. 类型系统 (Types)
 **目标**: Go 类型到 Cypher 类型的转换
@@ -76,13 +76,9 @@ norm/
 │   ├── query.go         # 主查询构建器
 │   ├── node.go          # 节点构建器
 │   ├── relationship.go  # 关系构建器
-│   ├── clause.go        # 子句构建器
+│   ├── expression.go    # 表达式构建器
+│   ├── entity.go        # 实体解析器
 │   └── types.go         # 构建器类型定义
-├── model/               # 模型系统
-│   ├── registry.go      # 实体注册表
-│   ├── entity.go        # 实体管理
-│   ├── property.go      # 属性管理
-│   └── label.go         # 标签管理
 ├── types/               # 类型系统
 │   ├── core.go          # 核心类型定义
 │   ├── converter.go     # 类型转换器
@@ -127,21 +123,25 @@ type QueryBuilder interface {
     Build() (QueryResult, error)
     Validate() []ValidationError
     
-    // 实体操作
+    // 实体操作 (无需预注册)
     MatchEntity(entity interface{}) QueryBuilder
     CreateEntity(entity interface{}) QueryBuilder
+    MergeEntity(entity interface{}) QueryBuilder
 }
 
-// As a helper for aliasing
-func As(expression, alias string) interface{}
+// 表达式别名辅助函数
+func As(expression, alias string) Expression
 ```
 
-### 模型注册接口
+### 实体解析接口
 ```go
-type Registry interface {
-    Register(entity interface{}) error
-    Get(name string) (*EntityMetadata, bool)
-    GetByType(t reflect.Type) (*EntityMetadata, bool)
+type EntityInfo struct {
+    Labels     []string
+    Properties map[string]interface{}
+}
+
+// 直接解析结构体实例，无需预注册
+func ParseEntity(entity interface{}) (*EntityInfo, error)
     Validate(entity interface{}) error
 }
 ```

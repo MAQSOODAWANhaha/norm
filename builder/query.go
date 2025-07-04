@@ -3,10 +3,8 @@ package builder
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 
-	"norm/model"
 	"norm/types"
 	"norm/validator"
 )
@@ -36,9 +34,10 @@ type QueryBuilder interface {
 	Build() (types.QueryResult, error)
 	Validate() []types.ValidationError
 
-	// 实体操作
+	// 实体操作 (无需预注册)
 	MatchEntity(entity interface{}) QueryBuilder
 	CreateEntity(entity interface{}) QueryBuilder
+	MergeEntity(entity interface{}) QueryBuilder
 }
 
 // cypherQueryBuilder 实现 QueryBuilder 接口
@@ -46,17 +45,15 @@ type cypherQueryBuilder struct {
 	clauses      []types.Clause
 	parameters   map[string]interface{}
 	paramCounter int
-	registry     model.Registry
 	validator    validator.QueryValidator
 }
 
 // NewQueryBuilder 创建新的查询构建器
-func NewQueryBuilder(registry model.Registry) QueryBuilder {
+func NewQueryBuilder() QueryBuilder {
 	return &cypherQueryBuilder{
 		clauses:      make([]types.Clause, 0),
 		parameters:   make(map[string]interface{}),
 		paramCounter: 0,
-		registry:     registry,
 		validator:    validator.NewQueryValidator(true), // strictMode = true
 	}
 }
@@ -145,41 +142,44 @@ func (q *cypherQueryBuilder) CreateEntity(entity interface{}) QueryBuilder {
 	return q.Create(pattern)
 }
 
+// MergeEntity 合并实体
+func (q *cypherQueryBuilder) MergeEntity(entity interface{}) QueryBuilder {
+	pattern, err := q.buildEntityPattern(entity, "")
+	if err != nil {
+		// 错误处理将在第二阶段完善
+		return q
+	}
+	return q.Merge(pattern)
+}
+
 // buildEntityPattern 构建实体模式
 func (q *cypherQueryBuilder) buildEntityPattern(entity interface{}, variable string) (string, error) {
-	t := reflect.TypeOf(entity)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
+	// 解析实体信息
+	entityInfo, err := ParseEntity(entity)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse entity: %w", err)
 	}
 
-	metadata, exists := q.registry.GetByType(t)
-	if !exists {
-		return "", fmt.Errorf("entity %s not registered", t.Name())
-	}
-
+	// 创建节点构建器
 	nodeBuilder := NewNodeBuilder()
 	if variable != "" {
 		nodeBuilder = nodeBuilder.Variable(variable)
 	}
-	nodeBuilder = nodeBuilder.Labels(metadata.Labels...)
 
-	v := reflect.ValueOf(entity)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
+	// 添加标签
+	if len(entityInfo.Labels) > 0 {
+		nodeBuilder = nodeBuilder.Labels(entityInfo.Labels...)
 	}
 
-	properties := make(map[string]interface{})
-	for fieldName, propMeta := range metadata.Properties {
-		fieldValue := v.FieldByName(fieldName)
-		if fieldValue.IsValid() && !fieldValue.IsZero() {
-			paramName := q.generateParameterName(propMeta.CypherName)
-			properties[propMeta.CypherName] = fmt.Sprintf("$"+"%s", paramName)
-			q.parameters[paramName] = fieldValue.Interface()
+	// 处理属性，将值转换为参数
+	if len(entityInfo.Properties) > 0 {
+		paramProperties := make(map[string]interface{})
+		for propName, propValue := range entityInfo.Properties {
+			paramName := q.generateParameterName(propName)
+			paramProperties[propName] = fmt.Sprintf("$%s", paramName)
+			q.parameters[paramName] = propValue
 		}
-	}
-
-	if len(properties) > 0 {
-		nodeBuilder = nodeBuilder.Properties(properties)
+		nodeBuilder = nodeBuilder.Properties(paramProperties)
 	}
 
 	return nodeBuilder.Build(), nil
