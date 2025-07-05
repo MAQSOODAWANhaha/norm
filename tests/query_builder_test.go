@@ -63,29 +63,34 @@ func TestQueryBuilder(t *testing.T) {
 func TestQueryBuilder_Set(t *testing.T) {
 	t.Run("Simple Set", func(t *testing.T) {
 		b := builder.NewQueryBuilder()
-		result, err := b.
-			Match(&User{}).As("u").
-			Where(builder.Eq("u.username", "testuser")).
-			Set("u.active = false").
-			Return("u").
-			Build()
+        result, err := b.
+            Match(&User{}).As("u").
+            Where(builder.Eq("u.username", "testuser")).
+            Set(map[string]interface{}{"active": false}).
+            Return("u").
+            Build()
 
-		if err != nil {
-			t.Fatalf("Build() failed: %v", err)
-		}
+        if err != nil {
+            t.Fatalf("Build() failed: %v", err)
+        }
 
-		expectedQuery := "MATCH (u:User:Person)\nWHERE (u.username = $u_username_1)\nSET u.active = false\nRETURN u"
-		if result.Query != expectedQuery {
-			t.Errorf("unexpected query string:\ngot:  %s\nwant: %s", result.Query, expectedQuery)
-		}
+        expectedQuery := "MATCH (u:User:Person)\nWHERE (u.username = $u_username_1)\nSET u.active = $active_2\nRETURN u"
+        if result.Query != expectedQuery {
+            t.Errorf("unexpected query string:\ngot:  %s\nwant: %s", result.Query, expectedQuery)
+        }
 
-		expectedParams := map[string]interface{}{
-			"u_username_1": "testuser",
-		}
+        expectedParams := map[string]interface{}{
+            "u_username_1": "testuser",
+            "active_2":     false,
+        }
 
-		// This is a temporary, more robust check until the WHERE clause issue is fixed.
-		if len(result.Parameters) != len(expectedParams) {
-			t.Errorf("unexpected number of parameters: got %d, want %d", len(result.Parameters), len(expectedParams))
-		}
-	})
+        if len(result.Parameters) != len(expectedParams) {
+            t.Errorf("unexpected number of parameters: got %d, want %d", len(result.Parameters), len(expectedParams))
+        }
+        for k, v := range expectedParams {
+            if result.Parameters[k] != v {
+                t.Errorf("parameter %s mismatch: got %v, want %v", k, result.Parameters[k], v)
+            }
+        }
+    })
 }

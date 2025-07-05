@@ -20,10 +20,16 @@ const (
 	OpIsNull             Operator = "IS NULL"
 	OpIsNotNull          Operator = "IS NOT NULL"
 
+	// Property Existence Operator
+	OpExists Operator = "EXISTS"
+
 	// Logical Operators
 	OpAnd Operator = "AND"
 	OpOr  Operator = "OR"
 	OpNot Operator = "NOT"
+
+	// Set Operator
+	OpSet Operator = "+="
 )
 
 // Condition represents a part of a WHERE clause, which can be a simple
@@ -53,3 +59,17 @@ type LogicalGroup struct {
 }
 
 func (lg LogicalGroup) isCondition() {}
+
+// ExistsClause represents an EXISTS subquery.
+// e.g., "EXISTS { MATCH (n)-[:KNOWS]->(m) }".
+type ExistsClause struct {
+	Query QueryBuilder
+}
+
+func (e ExistsClause) isCondition() {}
+
+// QueryBuilder is an interface that represents a query builder.
+// This is needed to avoid circular dependencies.
+type QueryBuilder interface {
+	Build() (QueryResult, error)
+}

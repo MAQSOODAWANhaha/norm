@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"norm/builder"
-
 	"norm/types"
 )
 
@@ -211,8 +210,14 @@ func TestAdvancedQueryStructures(t *testing.T) {
 
 		result, err := builder.NewQueryBuilder().
 			Merge(user).As("u").
-			OnCreate("u.created = timestamp()", "u.status = 'new'").
-			OnMatch("u.lastSeen = timestamp()", "u.status = 'active'").
+			OnCreate(map[string]interface{}{
+				"u.created": builder.Raw("timestamp()"),
+				"u.status":  builder.Raw("'new'"),
+			}).
+			OnMatch(map[string]interface{}{
+				"u.lastSeen": builder.Raw("timestamp()"),
+				"u.status":   builder.Raw("'active'"),
+			}).
 			Return("u").
 			Build()
 
@@ -220,11 +225,12 @@ func TestAdvancedQueryStructures(t *testing.T) {
 			t.Fatalf("Error building query: %v", err)
 		}
 
-		expectedClauses := []string{"MERGE", "ON CREATE", "ON MATCH", "RETURN"}
-		for _, clause := range expectedClauses {
-			if !containsString(result.Query, clause) {
-				t.Errorf("Query should contain %s clause", clause)
-			}
+		expectedQuery := `MERGE (u:User {email: $email, username: $username})
+ON CREATE SET u.created = timestamp(), u.status = 'new'
+ON MATCH SET u.lastSeen = timestamp(), u.status = 'active'
+RETURN u`
+		if result.Query != expectedQuery {
+			t.Errorf("Expected query:\n%s\nGot:\n%s", expectedQuery, result.Query)
 		}
 
 		t.Logf("Generated MERGE query: %s", result.Query)
@@ -247,7 +253,7 @@ func TestAdvancedQueryStructures(t *testing.T) {
 			t.Error("Query should contain UNWIND clause")
 		}
 
-		if result.Parameters["list_1"] == nil {
+		if result.Parameters["list"] == nil {
 			t.Error("Query should have parameterized list")
 		}
 

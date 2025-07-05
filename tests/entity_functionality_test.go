@@ -5,9 +5,7 @@ import (
 	"testing"
 
 	"norm/builder"
-
 	"norm/types"
-
 	"github.com/stretchr/testify/assert"
 )
 

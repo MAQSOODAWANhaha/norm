@@ -230,8 +230,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/opt/go/norm/builder"
-	"github.com/opt/go/norm/types"
+	"norm/builder"
+	"norm/types"
 )
 
 // 定义实体

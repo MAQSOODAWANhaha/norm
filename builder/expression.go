@@ -32,6 +32,11 @@ func (e Expression) BuildAs(alias string) Expression {
 	return Expression{Text: e.Text, Alias: alias}
 }
 
+// Raw an expression from a raw string
+func Raw(expression string) Expression {
+	return Expression{Text: expression}
+}
+
 // ExpressionBuilder 表达式构建器 (旧版，逐步废弃，保留用于向后兼容)
 type ExpressionBuilder struct {
 	parts []string
@@ -246,6 +251,12 @@ func IsNull(property string) types.Condition {
 	return types.Predicate{Property: property, Operator: types.OpIsNull}
 }
 
+// ExistsProperty checks for the existence of a property on a node or relationship.
+// This translates to `exists(variable.property)`.
+func ExistsProperty(property string) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpExists}
+}
+
 // IsNotNull 不为空表达式
 func IsNotNull(property string) types.Condition {
 	return types.Predicate{Property: property, Operator: types.OpIsNotNull}
@@ -374,6 +385,11 @@ func ToString(expression string) Expression {
 	return Expression{Text: fmt.Sprintf("toString(%s)", expression)}
 }
 
+// ToStringOrNull 转字符串函数，失败则返回null
+func ToStringOrNull(expression string) Expression {
+	return Expression{Text: fmt.Sprintf("toStringOrNull(%s)", expression)}
+}
+
 // Left 左侧字符串函数
 func Left(str, length string) Expression {
 	return Expression{Text: fmt.Sprintf("left(%s, %s)", str, length)}
@@ -451,9 +467,29 @@ func Cos(expression string) Expression {
 	return Expression{Text: fmt.Sprintf("cos(%s)", expression)}
 }
 
+// Asin 反正弦函数
+func Asin(expression string) Expression {
+	return Expression{Text: fmt.Sprintf("asin(%s)", expression)}
+}
+
+// Acos 反余弦函数
+func Acos(expression string) Expression {
+	return Expression{Text: fmt.Sprintf("acos(%s)", expression)}
+}
+
+// Atan 反正切函数
+func Atan(expression string) Expression {
+	return Expression{Text: fmt.Sprintf("atan(%s)", expression)}
+}
+
 // Tan 正切函数
 func Tan(expression string) Expression {
 	return Expression{Text: fmt.Sprintf("tan(%s)", expression)}
+}
+
+// Pow 幂函数
+func Pow(base, exponent string) Expression {
+	return Expression{Text: fmt.Sprintf("pow(%s, %s)", base, exponent)}
 }
 
 // Rand 随机数函数
@@ -508,6 +544,26 @@ func Type(relationship string) Expression {
 	return Expression{Text: fmt.Sprintf("type(%s)", relationship)}
 }
 
+// Sort 排序列表函数
+func Sort(list string) Expression {
+	return Expression{Text: fmt.Sprintf("sort(%s)", list)}
+}
+
+// Reduce 归约列表函数
+func Reduce(accumulator, variable, list, expression string) Expression {
+	return Expression{Text: fmt.Sprintf("reduce(%s, %s IN %s | %s)", accumulator, variable, list, expression)}
+}
+
+// Extract 提取列表函数
+func Extract(variable, list, expression string) Expression {
+	return Expression{Text: fmt.Sprintf("extract(%s IN %s | %s)", variable, list, expression)}
+}
+
+// Filter 过滤列表函数
+func Filter(variable, list, predicate string) Expression {
+	return Expression{Text: fmt.Sprintf("filter(%s IN %s WHERE %s)", variable, list, predicate)}
+}
+
 // ================================
 // 谓词函数 (Predicate Functions)
 // ================================
@@ -515,11 +571,6 @@ func Type(relationship string) Expression {
 // Exists 存在性检查函数
 func Exists(expression string) Expression {
 	return Expression{Text: fmt.Sprintf("exists(%s)", expression)}
-}
-
-// IsEmpty 空值检查函数
-func IsEmpty(expression string) Expression {
-	return Expression{Text: fmt.Sprintf("isEmpty(%s)", expression)}
 }
 
 // All 全部满足条件函数
@@ -623,6 +674,11 @@ func LocalDateTime(expression ...string) Expression {
 // Duration 持续时间函数
 func Duration(expression string) Expression {
 	return Expression{Text: fmt.Sprintf("duration(%s)", expression)}
+}
+
+// Timestamp 时间戳函数
+func Timestamp() Expression {
+	return Expression{Text: "timestamp()"}
 }
 
 // ================================
