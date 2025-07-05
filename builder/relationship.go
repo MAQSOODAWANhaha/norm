@@ -10,154 +10,290 @@ import (
 
 // RelationshipBuilder 关系构建器接口
 type RelationshipBuilder interface {
-	Variable(name string) RelationshipBuilder
+	// 基本关系构建
 	Type(relType string) RelationshipBuilder
-	Direction(dir types.Direction) RelationshipBuilder
-	Properties(props map[string]interface{}) RelationshipBuilder
-	Property(key string, value interface{}) RelationshipBuilder
-	Length(min, max int) RelationshipBuilder
-	Build() string
-	Clone() RelationshipBuilder
+	Variable(variable string) RelationshipBuilder
+	Direction(direction types.Direction) RelationshipBuilder
+	Properties(properties map[string]interface{}) RelationshipBuilder
+	
+	// 变长路径
+	MinLength(min int) RelationshipBuilder
+	MaxLength(max int) RelationshipBuilder
+	VarLength(min, max int) RelationshipBuilder
+	
+	// 构建模式
+	Build() types.RelationshipPattern
+	String() string
 }
 
+// relationshipBuilder 关系构建器实现
 type relationshipBuilder struct {
-	variable   string
-	relType    string
-	direction  types.Direction
-	properties map[string]interface{}
-	minLength  int
-	maxLength  int
+	pattern types.RelationshipPattern
 }
 
 // NewRelationshipBuilder 创建新的关系构建器
 func NewRelationshipBuilder() RelationshipBuilder {
 	return &relationshipBuilder{
-		properties: make(map[string]interface{}),
-		minLength:  -1,
-		maxLength:  -1,
+		pattern: types.RelationshipPattern{
+			Direction: types.DirectionOutgoing, // 默认方向
+		},
 	}
-}
-
-// Variable 设置关系变量
-func (rb *relationshipBuilder) Variable(name string) RelationshipBuilder {
-	rb.variable = name
-	return rb
 }
 
 // Type 设置关系类型
 func (rb *relationshipBuilder) Type(relType string) RelationshipBuilder {
-	rb.relType = relType
+	rb.pattern.Type = relType
+	return rb
+}
+
+// Variable 设置关系变量
+func (rb *relationshipBuilder) Variable(variable string) RelationshipBuilder {
+	rb.pattern.Variable = variable
 	return rb
 }
 
 // Direction 设置关系方向
-func (rb *relationshipBuilder) Direction(dir types.Direction) RelationshipBuilder {
-	rb.direction = dir
+func (rb *relationshipBuilder) Direction(direction types.Direction) RelationshipBuilder {
+	rb.pattern.Direction = direction
 	return rb
 }
 
-// Properties 设置所有属性
-func (rb *relationshipBuilder) Properties(props map[string]interface{}) RelationshipBuilder {
-	for k, v := range props {
-		rb.properties[k] = v
-	}
+// Properties 设置关系属性
+func (rb *relationshipBuilder) Properties(properties map[string]interface{}) RelationshipBuilder {
+	rb.pattern.Properties = properties
 	return rb
 }
 
-// Property 设置单个属性
-func (rb *relationshipBuilder) Property(key string, value interface{}) RelationshipBuilder {
-	rb.properties[key] = value
+// MinLength 设置最小长度
+func (rb *relationshipBuilder) MinLength(min int) RelationshipBuilder {
+	rb.pattern.MinLength = &min
 	return rb
 }
 
-// Length 设置关系长度约束
-func (rb *relationshipBuilder) Length(min, max int) RelationshipBuilder {
-	rb.minLength = min
-	rb.maxLength = max
+// MaxLength 设置最大长度
+func (rb *relationshipBuilder) MaxLength(max int) RelationshipBuilder {
+	rb.pattern.MaxLength = &max
 	return rb
 }
 
-// Clone 克隆关系构建器
-func (rb *relationshipBuilder) Clone() RelationshipBuilder {
-	clone := &relationshipBuilder{
-		variable:   rb.variable,
-		relType:    rb.relType,
-		direction:  rb.direction,
-		properties: make(map[string]interface{}),
-		minLength:  rb.minLength,
-		maxLength:  rb.maxLength,
-	}
-
-	for k, v := range rb.properties {
-		clone.properties[k] = v
-	}
-
-	return clone
+// VarLength 设置变长路径范围
+func (rb *relationshipBuilder) VarLength(min, max int) RelationshipBuilder {
+	rb.pattern.MinLength = &min
+	rb.pattern.MaxLength = &max
+	return rb
 }
 
 // Build 构建关系模式
-func (rb *relationshipBuilder) Build() string {
-	var parts []string
+func (rb *relationshipBuilder) Build() types.RelationshipPattern {
+	return rb.pattern
+}
 
-	// 添加变量
-	if rb.variable != "" {
-		parts = append(parts, rb.variable)
-	}
-
-	// 添加类型
-	if rb.relType != "" {
-		parts = append(parts, ":"+rb.relType)
-	}
-
-	// 添加长度约束
-	if rb.minLength >= 0 || rb.maxLength >= 0 {
-		var lengthStr string
-		if rb.minLength >= 0 && rb.maxLength >= 0 {
-			lengthStr = fmt.Sprintf("*%d..%d", rb.minLength, rb.maxLength)
-		} else if rb.minLength >= 0 {
-			lengthStr = fmt.Sprintf("*%d..", rb.minLength)
-		} else if rb.maxLength >= 0 {
-			lengthStr = fmt.Sprintf("*..%d", rb.maxLength)
-		}
-		parts = append(parts, lengthStr)
-	}
-
-	// 添加属性
-	if len(rb.properties) > 0 {
-		propParts := make([]string, 0, len(rb.properties))
-		for k, v := range rb.properties {
-			propParts = append(propParts, fmt.Sprintf("%s: %s", k, rb.formatValue(v)))
-		}
-		propStr := "{" + strings.Join(propParts, ", ") + "}"
-		parts = append(parts, propStr)
-	}
-
-	content := strings.Join(parts, "")
-
-	// 根据方向格式化
-	switch rb.direction {
-	case types.DirectionOutgoing:
-		return "-[" + content + "]->"
+// String 生成关系模式字符串
+func (rb *relationshipBuilder) String() string {
+	var sb strings.Builder
+	
+	// 开始括号和方向
+	switch rb.pattern.Direction {
 	case types.DirectionIncoming:
-		return "<-[" + content + "]-"
+		sb.WriteString("<-")
+	case types.DirectionOutgoing:
+		sb.WriteString("-")
+	case types.DirectionBoth:
+		sb.WriteString("-")
 	default:
-		return "-[" + content + "]-"
+		sb.WriteString("-")
+	}
+	
+	sb.WriteString("[")
+	
+	// 变量名
+	if rb.pattern.Variable != "" {
+		sb.WriteString(rb.pattern.Variable)
+	}
+	
+	// 关系类型
+	if rb.pattern.Type != "" {
+		sb.WriteString(":")
+		sb.WriteString(rb.pattern.Type)
+	}
+	
+	// 变长路径
+	if rb.pattern.MinLength != nil || rb.pattern.MaxLength != nil {
+		sb.WriteString("*")
+		if rb.pattern.MinLength != nil {
+			sb.WriteString(fmt.Sprintf("%d", *rb.pattern.MinLength))
+		}
+		if rb.pattern.MaxLength != nil {
+			sb.WriteString("..")
+			sb.WriteString(fmt.Sprintf("%d", *rb.pattern.MaxLength))
+		} else if rb.pattern.MinLength != nil {
+			sb.WriteString("..")
+		}
+	}
+	
+	// 属性 (简化处理，实际应该参数化)
+	if len(rb.pattern.Properties) > 0 {
+		sb.WriteString(" {")
+		var props []string
+		for k, v := range rb.pattern.Properties {
+			props = append(props, fmt.Sprintf("%s: %v", k, v))
+		}
+		sb.WriteString(strings.Join(props, ", "))
+		sb.WriteString("}")
+	}
+	
+	sb.WriteString("]")
+	
+	// 结束方向
+	switch rb.pattern.Direction {
+	case types.DirectionIncoming:
+		sb.WriteString("-")
+	case types.DirectionOutgoing:
+		sb.WriteString("->")
+	case types.DirectionBoth:
+		sb.WriteString("-")
+	default:
+		sb.WriteString("->")
+	}
+	
+	return sb.String()
+}
+
+// PatternBuilder 图模式构建器
+type PatternBuilder interface {
+	StartNode(pattern types.NodePattern) PatternBuilder
+	Relationship(pattern types.RelationshipPattern) PatternBuilder
+	EndNode(pattern types.NodePattern) PatternBuilder
+	Build() types.Pattern
+	String() string
+}
+
+// patternBuilder 图模式构建器实现
+type patternBuilder struct {
+	pattern types.Pattern
+}
+
+// NewPatternBuilder 创建新的图模式构建器
+func NewPatternBuilder() PatternBuilder {
+	return &patternBuilder{}
+}
+
+// StartNode 设置起始节点
+func (pb *patternBuilder) StartNode(pattern types.NodePattern) PatternBuilder {
+	pb.pattern.StartNode = pattern
+	return pb
+}
+
+// Relationship 设置关系
+func (pb *patternBuilder) Relationship(pattern types.RelationshipPattern) PatternBuilder {
+	pb.pattern.Relationship = pattern
+	return pb
+}
+
+// EndNode 设置结束节点
+func (pb *patternBuilder) EndNode(pattern types.NodePattern) PatternBuilder {
+	pb.pattern.EndNode = pattern
+	return pb
+}
+
+// Build 构建完整模式
+func (pb *patternBuilder) Build() types.Pattern {
+	return pb.pattern
+}
+
+// String 生成完整模式字符串
+func (pb *patternBuilder) String() string {
+	var sb strings.Builder
+	
+	// 起始节点
+	sb.WriteString(pb.buildNodeString(pb.pattern.StartNode))
+	
+	// 关系
+	rb := &relationshipBuilder{pattern: pb.pattern.Relationship}
+	sb.WriteString(rb.String())
+	
+	// 结束节点
+	sb.WriteString(pb.buildNodeString(pb.pattern.EndNode))
+	
+	return sb.String()
+}
+
+// buildNodeString 构建节点字符串
+func (pb *patternBuilder) buildNodeString(node types.NodePattern) string {
+	var sb strings.Builder
+	sb.WriteString("(")
+	
+	// 变量名
+	if node.Variable != "" {
+		sb.WriteString(node.Variable)
+	}
+	
+	// 标签
+	for _, label := range node.Labels {
+		sb.WriteString(":")
+		sb.WriteString(label)
+	}
+	
+	// 属性 (简化处理)
+	if len(node.Properties) > 0 {
+		sb.WriteString(" {")
+		var props []string
+		for k, v := range node.Properties {
+			props = append(props, fmt.Sprintf("%s: %v", k, v))
+		}
+		sb.WriteString(strings.Join(props, ", "))
+		sb.WriteString("}")
+	}
+	
+	sb.WriteString(")")
+	return sb.String()
+}
+
+// 便利函数
+
+// Outgoing 创建外向关系
+func Outgoing(relType string) RelationshipBuilder {
+	return NewRelationshipBuilder().Type(relType).Direction(types.DirectionOutgoing)
+}
+
+// Incoming 创建入向关系
+func Incoming(relType string) RelationshipBuilder {
+	return NewRelationshipBuilder().Type(relType).Direction(types.DirectionIncoming)
+}
+
+// Bidirectional 创建双向关系
+func Bidirectional(relType string) RelationshipBuilder {
+	return NewRelationshipBuilder().Type(relType).Direction(types.DirectionBoth)
+}
+
+// VarLengthOutgoing 创建变长外向关系
+func VarLengthOutgoing(relType string, min, max int) RelationshipBuilder {
+	return NewRelationshipBuilder().Type(relType).Direction(types.DirectionOutgoing).VarLength(min, max)
+}
+
+// VarLengthIncoming 创建变长入向关系
+func VarLengthIncoming(relType string, min, max int) RelationshipBuilder {
+	return NewRelationshipBuilder().Type(relType).Direction(types.DirectionIncoming).VarLength(min, max)
+}
+
+// VarLengthBidirectional 创建变长双向关系
+func VarLengthBidirectional(relType string, min, max int) RelationshipBuilder {
+	return NewRelationshipBuilder().Type(relType).Direction(types.DirectionBoth).VarLength(min, max)
+}
+
+// Node 创建节点模式
+func Node(variable string, labels ...string) types.NodePattern {
+	return types.NodePattern{
+		Variable: variable,
+		Labels:   labels,
 	}
 }
 
-// formatValue 格式化属性值
-func (rb *relationshipBuilder) formatValue(value interface{}) string {
-	switch v := value.(type) {
-	case string:
-		if strings.HasPrefix(v, "$") {
-			return v // 参数引用
-		}
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "\\'"))
-	case int, int64, float64:
-		return fmt.Sprintf("%v", v)
-	case bool:
-		return fmt.Sprintf("%t", v)
-	default:
-		return fmt.Sprintf("'%v'", v)
+// NodeWithProps 创建带属性的节点模式
+func NodeWithProps(variable string, labels []string, properties map[string]interface{}) types.NodePattern {
+	return types.NodePattern{
+		Variable:   variable,
+		Labels:     labels,
+		Properties: properties,
 	}
 }

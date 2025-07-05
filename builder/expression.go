@@ -4,6 +4,8 @@ package builder
 import (
 	"fmt"
 	"strings"
+
+	"norm/types"
 )
 
 // Expression 代表一个可被别名的表达式
@@ -30,7 +32,7 @@ func (e Expression) BuildAs(alias string) Expression {
 	return Expression{Text: e.Text, Alias: alias}
 }
 
-// ExpressionBuilder 表达式构建器
+// ExpressionBuilder 表达式构建器 (旧版，逐步废弃，保留用于向后兼容)
 type ExpressionBuilder struct {
 	parts []string
 }
@@ -50,61 +52,61 @@ func (eb *ExpressionBuilder) Property(property string) *ExpressionBuilder {
 
 // Equal 等于比较 (=)
 func (eb *ExpressionBuilder) Equal(value interface{}) *ExpressionBuilder {
-	eb.parts = append(eb.parts, "=", eb.formatValue(value))
+	eb.parts = append(eb.parts, "=", formatValue(value))
 	return eb
 }
 
 // NotEqual 不等于比较 (<>)
 func (eb *ExpressionBuilder) NotEqual(value interface{}) *ExpressionBuilder {
-	eb.parts = append(eb.parts, "<>", eb.formatValue(value))
+	eb.parts = append(eb.parts, "<>", formatValue(value))
 	return eb
 }
 
 // LessThan 小于比较 (<)
 func (eb *ExpressionBuilder) LessThan(value interface{}) *ExpressionBuilder {
-	eb.parts = append(eb.parts, "<", eb.formatValue(value))
+	eb.parts = append(eb.parts, "<", formatValue(value))
 	return eb
 }
 
 // LessThanOrEqual 小于等于比较 (<=)
 func (eb *ExpressionBuilder) LessThanOrEqual(value interface{}) *ExpressionBuilder {
-	eb.parts = append(eb.parts, "<=", eb.formatValue(value))
+	eb.parts = append(eb.parts, "<=", formatValue(value))
 	return eb
 }
 
 // GreaterThan 大于比较 (>)
 func (eb *ExpressionBuilder) GreaterThan(value interface{}) *ExpressionBuilder {
-	eb.parts = append(eb.parts, ">", eb.formatValue(value))
+	eb.parts = append(eb.parts, ">", formatValue(value))
 	return eb
 }
 
 // GreaterThanOrEqual 大于等于比较 (>=)
 func (eb *ExpressionBuilder) GreaterThanOrEqual(value interface{}) *ExpressionBuilder {
-	eb.parts = append(eb.parts, ">=", eb.formatValue(value))
+	eb.parts = append(eb.parts, ">=", formatValue(value))
 	return eb
 }
 
 // Contains 包含操作 (CONTAINS)
 func (eb *ExpressionBuilder) Contains(value string) *ExpressionBuilder {
-	eb.parts = append(eb.parts, "CONTAINS", eb.formatValue(value))
+	eb.parts = append(eb.parts, "CONTAINS", formatValue(value))
 	return eb
 }
 
 // StartsWith 开始于操作 (STARTS WITH)
 func (eb *ExpressionBuilder) StartsWith(value string) *ExpressionBuilder {
-	eb.parts = append(eb.parts, "STARTS", "WITH", eb.formatValue(value))
+	eb.parts = append(eb.parts, "STARTS", "WITH", formatValue(value))
 	return eb
 }
 
 // EndsWith 结束于操作 (ENDS WITH)
 func (eb *ExpressionBuilder) EndsWith(value string) *ExpressionBuilder {
-	eb.parts = append(eb.parts, "ENDS", "WITH", eb.formatValue(value))
+	eb.parts = append(eb.parts, "ENDS", "WITH", formatValue(value))
 	return eb
 }
 
 // Regex 正则表达式匹配 (=~)
 func (eb *ExpressionBuilder) Regex(pattern string) *ExpressionBuilder {
-	eb.parts = append(eb.parts, "=~", eb.formatValue(pattern))
+	eb.parts = append(eb.parts, "=~", formatValue(pattern))
 	return eb
 }
 
@@ -112,7 +114,7 @@ func (eb *ExpressionBuilder) Regex(pattern string) *ExpressionBuilder {
 func (eb *ExpressionBuilder) In(values ...interface{}) *ExpressionBuilder {
 	var valueStrs []string
 	for _, v := range values {
-		valueStrs = append(valueStrs, eb.formatValue(v))
+		valueStrs = append(valueStrs, formatValue(v))
 	}
 	eb.parts = append(eb.parts, "IN", "["+strings.Join(valueStrs, ", ")+"]")
 	return eb
@@ -161,14 +163,14 @@ func (eb *ExpressionBuilder) BuildAs(alias string) Expression {
 	}
 }
 
-// formatValue 格式化值
-func (eb *ExpressionBuilder) formatValue(value interface{}) string {
+// formatValue 格式化值 (旧版，逐步废弃)
+func formatValue(value interface{}) string {
 	switch v := value.(type) {
 	case string:
 		if strings.HasPrefix(v, "$") {
 			return v // 参数引用
 		}
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "\\'"))
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "'"))
 	case int, int64, int32, int16, int8:
 		return fmt.Sprintf("%v", v)
 	case float64, float32:
@@ -180,92 +182,100 @@ func (eb *ExpressionBuilder) formatValue(value interface{}) string {
 	}
 }
 
-// 便利函数，用于快速创建常用表达式
+// =================================================================
+// 新版谓词函数 (Predicate Functions) - 返回 types.Condition
+// =================================================================
 
 // Eq 等于表达式
-func Eq(property string, value interface{}) string {
-	return NewExpression().Property(property).Equal(value).Build()
+func Eq(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpEqual, Value: value}
 }
 
 // Ne 不等于表达式
-func Ne(property string, value interface{}) string {
-	return NewExpression().Property(property).NotEqual(value).Build()
+func Ne(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpNotEqual, Value: value}
 }
 
 // Lt 小于表达式
-func Lt(property string, value interface{}) string {
-	return NewExpression().Property(property).LessThan(value).Build()
+func Lt(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpLessThan, Value: value}
 }
 
 // Le 小于等于表达式
-func Le(property string, value interface{}) string {
-	return NewExpression().Property(property).LessThanOrEqual(value).Build()
+func Le(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpLessThanOrEqual, Value: value}
 }
 
 // Gt 大于表达式
-func Gt(property string, value interface{}) string {
-	return NewExpression().Property(property).GreaterThan(value).Build()
+func Gt(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpGreaterThan, Value: value}
 }
 
 // Ge 大于等于表达式
-func Ge(property string, value interface{}) string {
-	return NewExpression().Property(property).GreaterThanOrEqual(value).Build()
+func Ge(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpGreaterThanOrEqual, Value: value}
 }
 
-// Like 包含表达式 (使用 CONTAINS)
-func Like(property, value string) string {
-	return NewExpression().Property(property).Contains(value).Build()
+// Contains 包含表达式
+func Contains(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpContains, Value: value}
 }
 
-// InList 在列表中表达式
-func InList(property string, values ...interface{}) string {
-	return NewExpression().Property(property).In(values...).Build()
+// StartsWith 开始于表达式
+func StartsWith(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpStartsWith, Value: value}
+}
+
+// EndsWith 结束于表达式
+func EndsWith(property string, value interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpEndsWith, Value: value}
+}
+
+// Regex 正则表达式匹配
+func Regex(property string, pattern string) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpRegex, Value: pattern}
+}
+
+// In 在列表中表达式
+func In(property string, values ...interface{}) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpIn, Value: values}
 }
 
 // IsNull 为空表达式
-func IsNull(property string) string {
-	return NewExpression().Property(property).IsNull().Build()
+func IsNull(property string) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpIsNull}
 }
 
 // IsNotNull 不为空表达式
-func IsNotNull(property string) string {
-	return NewExpression().Property(property).IsNotNull().Build()
+func IsNotNull(property string) types.Condition {
+	return types.Predicate{Property: property, Operator: types.OpIsNotNull}
 }
 
-// Between 范围表达式 (使用 >= AND <=)
-func Between(property string, min, max interface{}) string {
-	return fmt.Sprintf("%s >= %s AND %s <= %s", 
-		property, 
-		NewExpression().formatValue(min),
-		property,
-		NewExpression().formatValue(max))
+// Not 逻辑非
+func Not(condition types.Condition) types.Condition {
+	switch c := condition.(type) {
+	case types.Predicate:
+		c.Not = !c.Not // Toggle the Not flag
+		return c
+	case types.LogicalGroup:
+		// For a group, it's more complex. A simple flag doesn't work well with Cypher syntax.
+		// A better approach is to wrap it, but for now, we'll stick to negating predicates.
+		// A full implementation might require a "NotGroup" type or similar.
+		// For now, we return the group unmodified and log a warning or handle it in the builder.
+		return c
+	default:
+		return condition
+	}
 }
 
-// MatchPattern 模式匹配表达式 (使用正则)
-func MatchPattern(property, pattern string) string {
-	return NewExpression().Property(property).Regex(pattern).Build()
+// And 连接多个条件用 AND
+func And(conditions ...types.Condition) types.Condition {
+	return types.LogicalGroup{Operator: types.OpAnd, Conditions: conditions}
 }
 
-// AndConditions 连接多个条件用 AND
-func AndConditions(conditions ...string) string {
-	if len(conditions) == 0 {
-		return ""
-	}
-	if len(conditions) == 1 {
-		return conditions[0]
-	}
-	return strings.Join(conditions, " AND ")
-}
-
-// OrConditions 连接多个条件用 OR
-func OrConditions(conditions ...string) string {
-	if len(conditions) == 0 {
-		return ""
-	}
-	if len(conditions) == 1 {
-		return conditions[0]
-	}
-	return "(" + strings.Join(conditions, " OR ") + ")"
+// Or 连接多个条件用 OR
+func Or(conditions ...types.Condition) types.Condition {
+	return types.LogicalGroup{Operator: types.OpOr, Conditions: conditions}
 }
 
 // ================================

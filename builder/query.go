@@ -3,212 +3,370 @@ package builder
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"norm/types"
 	"norm/validator"
 )
 
-// QueryBuilder 查询构建器接口
+// QueryBuilder is the interface for the Cypher query builder.
 type QueryBuilder interface {
-	// 基本子句
-	Match(pattern string) QueryBuilder
-	OptionalMatch(pattern string) QueryBuilder
-	Create(pattern string) QueryBuilder
-	Merge(pattern string) QueryBuilder
-	Where(condition string) QueryBuilder
-
-	// 表达式支持子句
+	// 基本模式匹配
+	Match(patternOrEntity interface{}) QueryBuilder
+	OptionalMatch(patternOrEntity interface{}) QueryBuilder
+	Create(patternOrEntity interface{}) QueryBuilder
+	Merge(patternOrEntity interface{}) QueryBuilder
+	As(alias string) QueryBuilder
+	
+	// 关系模式支持
+	MatchPattern(pattern types.Pattern) QueryBuilder
+	CreatePattern(pattern types.Pattern) QueryBuilder
+	MergePattern(pattern types.Pattern) QueryBuilder
+	
+	// 数据修改
+	Set(assignments ...string) QueryBuilder
+	Delete(variables ...string) QueryBuilder
+	DetachDelete(variables ...string) QueryBuilder
+	Remove(items ...string) QueryBuilder
+	
+	// MERGE 条件动作
+	OnCreate(assignments ...string) QueryBuilder
+	OnMatch(assignments ...string) QueryBuilder
+	
+	// 条件和过滤
+	Where(conditions ...types.Condition) QueryBuilder
+	WhereString(condition string) QueryBuilder
+	
+	// 数据返回和处理
 	Return(expressions ...interface{}) QueryBuilder
 	With(expressions ...interface{}) QueryBuilder
-
+	Unwind(list interface{}, alias string) QueryBuilder
+	
 	// 排序和限制
 	OrderBy(fields ...string) QueryBuilder
 	Skip(count int) QueryBuilder
 	Limit(count int) QueryBuilder
-
-	// 参数操作
+	
+	// 集合操作
+	Union() QueryBuilder
+	UnionAll() QueryBuilder
+	
+	// 高级功能
+	Use(database string) QueryBuilder
+	Call(subquery QueryBuilder) QueryBuilder
+	ForEach(variable string, list interface{}, updateClauses ...string) QueryBuilder
+	
+	// 参数和构建
 	SetParameter(key string, value interface{}) QueryBuilder
-
-	// 构建操作
 	Build() (types.QueryResult, error)
 	Validate() []types.ValidationError
-
-	// 实体操作 (无需预注册)
-	MatchEntity(entity interface{}) QueryBuilder
-	CreateEntity(entity interface{}) QueryBuilder
-	MergeEntity(entity interface{}) QueryBuilder
 }
 
-// cypherQueryBuilder 实现 QueryBuilder 接口
+// cypherQueryBuilder implements the QueryBuilder interface.
 type cypherQueryBuilder struct {
-	clauses      []types.Clause
-	parameters   map[string]interface{}
-	paramCounter int
-	validator    validator.QueryValidator
+	clauses       []types.Clause
+	parameters    map[string]interface{}
+	paramCounter  int
+	currentAlias  string
+	pendingEntity interface{}
+	pendingClause types.ClauseType
+	validator     validator.QueryValidator
+	errors        []error
 }
 
-// NewQueryBuilder 创建新的查询构建器
+// NewQueryBuilder creates a new instance of the query builder.
 func NewQueryBuilder() QueryBuilder {
 	return &cypherQueryBuilder{
 		clauses:      make([]types.Clause, 0),
 		parameters:   make(map[string]interface{}),
 		paramCounter: 0,
-		validator:    validator.NewQueryValidator(true), // strictMode = true
+		validator:    validator.NewQueryValidator(true),
+		errors:       make([]error, 0),
 	}
 }
 
-func (q *cypherQueryBuilder) addClause(clauseType types.ClauseType, content string) QueryBuilder {
-	q.clauses = append(q.clauses, types.Clause{
-		Type:    clauseType,
-		Content: content,
-	})
+// handleEntityClause handles methods that can take a string pattern or an entity struct.
+func (q *cypherQueryBuilder) handleEntityClause(clauseType types.ClauseType, p interface{}) QueryBuilder {
+	q.finalizePendingClause()
+	switch v := p.(type) {
+	case string:
+		q.addClause(clauseType, v)
+	default:
+		q.pendingEntity = v
+		q.pendingClause = clauseType
+	}
 	return q
 }
 
-// Match 添加 MATCH 子句
-func (q *cypherQueryBuilder) Match(pattern string) QueryBuilder {
-	return q.addClause(types.MatchClause, pattern)
+func (q *cypherQueryBuilder) Match(p interface{}) QueryBuilder {
+	return q.handleEntityClause(types.MatchClause, p)
 }
 
-// OptionalMatch 添加 OPTIONAL MATCH 子句
-func (q *cypherQueryBuilder) OptionalMatch(pattern string) QueryBuilder {
-	return q.addClause(types.OptionalMatchClause, pattern)
+func (q *cypherQueryBuilder) OptionalMatch(p interface{}) QueryBuilder {
+	return q.handleEntityClause(types.OptionalMatchClause, p)
 }
 
-// Create 添加 CREATE 子句
-func (q *cypherQueryBuilder) Create(pattern string) QueryBuilder {
-	return q.addClause(types.CreateClause, pattern)
+func (q *cypherQueryBuilder) Create(p interface{}) QueryBuilder {
+	return q.handleEntityClause(types.CreateClause, p)
 }
 
-// Merge 添加 MERGE 子句
-func (q *cypherQueryBuilder) Merge(pattern string) QueryBuilder {
-	return q.addClause(types.MergeClause, pattern)
+func (q *cypherQueryBuilder) Merge(p interface{}) QueryBuilder {
+	return q.handleEntityClause(types.MergeClause, p)
 }
 
-// Where 添加 WHERE 子句
-func (q *cypherQueryBuilder) Where(condition string) QueryBuilder {
-	return q.addClause(types.WhereClause, condition)
+// As sets the alias for a pending entity clause.
+func (q *cypherQueryBuilder) As(alias string) QueryBuilder {
+	if q.pendingEntity == nil {
+		// If there's no pending entity, this might be an alias for a subquery or other complex part.
+		// For now, we just set the alias for the next clauses.
+		q.currentAlias = alias
+		return q
+	}
+	q.currentAlias = alias
+	q.finalizePendingClause()
+	return q
 }
 
-// Return 添加 RETURN 子句
+func (q *cypherQueryBuilder) Set(assignments ...string) QueryBuilder {
+	q.finalizePendingClause()
+	q.addClause(types.SetClause, strings.Join(assignments, ", "))
+	return q
+}
+
+// finalizePendingClause builds and adds the clause that was waiting for an alias.
+func (q *cypherQueryBuilder) finalizePendingClause() {
+	if q.pendingEntity == nil {
+		return
+	}
+
+	pattern, err := q.buildEntityPattern(q.pendingEntity, q.currentAlias, q.pendingClause)
+	if err != nil {
+		q.errors = append(q.errors, err)
+	} else {
+		q.addClause(q.pendingClause, pattern)
+	}
+
+	q.pendingEntity = nil
+	q.pendingClause = ""
+}
+
+func (q *cypherQueryBuilder) Where(conditions ...types.Condition) QueryBuilder {
+	q.finalizePendingClause()
+	if len(conditions) == 0 {
+		return q
+	}
+	
+	var conditionStr strings.Builder
+	
+	// Always create an AND group for consistent formatting
+	group := types.LogicalGroup{Operator: types.OpAnd, Conditions: conditions}
+	q.buildConditionString(&group, &conditionStr)
+
+	q.addClause(types.WhereClause, conditionStr.String())
+	return q
+}
+
+func (q *cypherQueryBuilder) WhereString(condition string) QueryBuilder {
+	q.finalizePendingClause()
+	q.addClause(types.WhereClause, condition)
+	return q
+}
+
 func (q *cypherQueryBuilder) Return(expressions ...interface{}) QueryBuilder {
-	return q.addClause(types.ReturnClause, q.formatExpressions(expressions...))
+	q.finalizePendingClause()
+	q.addClause(types.ReturnClause, q.formatExpressions(expressions...))
+	return q
 }
 
-// With 添加 WITH 子句
 func (q *cypherQueryBuilder) With(expressions ...interface{}) QueryBuilder {
-	return q.addClause(types.WithClause, q.formatExpressions(expressions...))
+	q.finalizePendingClause()
+	q.addClause(types.WithClause, q.formatExpressions(expressions...))
+	return q
 }
 
-// OrderBy 添加 ORDER BY 子句
 func (q *cypherQueryBuilder) OrderBy(fields ...string) QueryBuilder {
-	return q.addClause(types.OrderByClause, strings.Join(fields, ", "))
+	q.finalizePendingClause()
+	q.addClause(types.OrderByClause, strings.Join(fields, ", "))
+	return q
 }
 
-// Skip 添加 SKIP 子句
 func (q *cypherQueryBuilder) Skip(count int) QueryBuilder {
-	return q.addClause(types.SkipClause, fmt.Sprintf("%d", count))
+	q.finalizePendingClause()
+	q.addClause(types.SkipClause, fmt.Sprintf("%d", count))
+	return q
 }
 
-// Limit 添加 LIMIT 子句
 func (q *cypherQueryBuilder) Limit(count int) QueryBuilder {
-	return q.addClause(types.LimitClause, fmt.Sprintf("%d", count))
+	q.finalizePendingClause()
+	q.addClause(types.LimitClause, fmt.Sprintf("%d", count))
+	return q
 }
 
-// SetParameter 设置查询参数
 func (q *cypherQueryBuilder) SetParameter(key string, value interface{}) QueryBuilder {
 	q.parameters[key] = value
 	return q
 }
 
-// MatchEntity 匹配实体
-func (q *cypherQueryBuilder) MatchEntity(entity interface{}) QueryBuilder {
-	pattern, err := q.buildEntityPattern(entity, "")
-	if err != nil {
-		// 错误处理将在第二阶段完善
+func (q *cypherQueryBuilder) Call(subquery QueryBuilder) QueryBuilder {
+	q.finalizePendingClause()
+
+	sub, ok := subquery.(*cypherQueryBuilder)
+	if !ok {
+		q.errors = append(q.errors, fmt.Errorf("subquery is not a valid *cypherQueryBuilder"))
 		return q
 	}
-	return q.Match(pattern)
-}
 
-// CreateEntity 创建实体
-func (q *cypherQueryBuilder) CreateEntity(entity interface{}) QueryBuilder {
-	pattern, err := q.buildEntityPattern(entity, "")
+	// The subquery should be built with its own context.
+	// We pass the parameter counter to avoid name collisions.
+	sub.paramCounter = q.paramCounter
+	subResult, err := sub.Build()
 	if err != nil {
-		// 错误处理将在第二阶段完善
+		q.errors = append(q.errors, fmt.Errorf("failed to build subquery: %w", err))
 		return q
 	}
-	return q.Create(pattern)
+	q.paramCounter = sub.paramCounter
+
+	// Merge parameters.
+	for k, v := range subResult.Parameters {
+		q.parameters[k] = v
+	}
+
+	// Add CALL clause with the subquery string.
+	q.addClause(types.CallClause, fmt.Sprintf("{\n%s\n}", subResult.Query))
+
+	return q
 }
 
-// MergeEntity 合并实体
-func (q *cypherQueryBuilder) MergeEntity(entity interface{}) QueryBuilder {
-	pattern, err := q.buildEntityPattern(entity, "")
-	if err != nil {
-		// 错误处理将在第二阶段完善
-		return q
-	}
-	return q.Merge(pattern)
+// 关系模式支持方法
+func (q *cypherQueryBuilder) MatchPattern(pattern types.Pattern) QueryBuilder {
+	q.finalizePendingClause()
+	patternStr := q.buildPatternString(pattern)
+	q.addClause(types.MatchClause, patternStr)
+	return q
 }
 
-// buildEntityPattern 构建实体模式
-func (q *cypherQueryBuilder) buildEntityPattern(entity interface{}, variable string) (string, error) {
-	// 解析实体信息
-	entityInfo, err := ParseEntity(entity)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse entity: %w", err)
-	}
-
-	// 创建节点构建器
-	nodeBuilder := NewNodeBuilder()
-	if variable != "" {
-		nodeBuilder = nodeBuilder.Variable(variable)
-	}
-
-	// 添加标签
-	if len(entityInfo.Labels) > 0 {
-		nodeBuilder = nodeBuilder.Labels(entityInfo.Labels...)
-	}
-
-	// 处理属性，将值转换为参数
-	if len(entityInfo.Properties) > 0 {
-		paramProperties := make(map[string]interface{})
-		for propName, propValue := range entityInfo.Properties {
-			paramName := q.generateParameterName(propName)
-			paramProperties[propName] = fmt.Sprintf("$%s", paramName)
-			q.parameters[paramName] = propValue
-		}
-		nodeBuilder = nodeBuilder.Properties(paramProperties)
-	}
-
-	return nodeBuilder.Build(), nil
+func (q *cypherQueryBuilder) CreatePattern(pattern types.Pattern) QueryBuilder {
+	q.finalizePendingClause()
+	patternStr := q.buildPatternString(pattern)
+	q.addClause(types.CreateClause, patternStr)
+	return q
 }
 
-// generateParameterName 生成参数名
-func (q *cypherQueryBuilder) generateParameterName(base string) string {
-	q.paramCounter++
-	return fmt.Sprintf("%s_%d", base, q.paramCounter)
+func (q *cypherQueryBuilder) MergePattern(pattern types.Pattern) QueryBuilder {
+	q.finalizePendingClause()
+	patternStr := q.buildPatternString(pattern)
+	q.addClause(types.MergeClause, patternStr)
+	return q
 }
 
-// formatExpressions 格式化表达式
-func (q *cypherQueryBuilder) formatExpressions(expressions ...interface{}) string {
-	var parts []string
-	for _, expr := range expressions {
-		switch v := expr.(type) {
-		case string:
-			parts = append(parts, v)
-		case Expression:
-			parts = append(parts, v.String())
-		default:
-			parts = append(parts, fmt.Sprintf("%v", v))
-		}
+// 数据修改方法
+func (q *cypherQueryBuilder) Delete(variables ...string) QueryBuilder {
+	q.finalizePendingClause()
+	q.addClause(types.DeleteClause, strings.Join(variables, ", "))
+	return q
+}
+
+func (q *cypherQueryBuilder) DetachDelete(variables ...string) QueryBuilder {
+	q.finalizePendingClause()
+	q.addClause(types.DetachDeleteClause, strings.Join(variables, ", "))
+	return q
+}
+
+func (q *cypherQueryBuilder) Remove(items ...string) QueryBuilder {
+	q.finalizePendingClause()
+	q.addClause(types.RemoveClause, strings.Join(items, ", "))
+	return q
+}
+
+// MERGE 条件动作方法
+func (q *cypherQueryBuilder) OnCreate(assignments ...string) QueryBuilder {
+	q.finalizePendingClause()
+	if len(assignments) > 0 {
+		content := fmt.Sprintf("SET %s", strings.Join(assignments, ", "))
+		q.addClause(types.OnCreateClause, content)
 	}
-	return strings.Join(parts, ", ")
+	return q
 }
 
-// Build 构建最终的 Cypher 查询
+func (q *cypherQueryBuilder) OnMatch(assignments ...string) QueryBuilder {
+	q.finalizePendingClause()
+	if len(assignments) > 0 {
+		content := fmt.Sprintf("SET %s", strings.Join(assignments, ", "))
+		q.addClause(types.OnMatchClause, content)
+	}
+	return q
+}
+
+// 数据处理方法
+func (q *cypherQueryBuilder) Unwind(list interface{}, alias string) QueryBuilder {
+	q.finalizePendingClause()
+	var listStr string
+	switch v := list.(type) {
+	case string:
+		listStr = v
+	case []interface{}:
+		// 处理数组
+		paramName := q.generateParameterName("list")
+		q.parameters[paramName] = v
+		listStr = fmt.Sprintf("$%s", paramName)
+	default:
+		listStr = fmt.Sprintf("%v", v)
+	}
+	q.addClause(types.UnwindClause, fmt.Sprintf("%s AS %s", listStr, alias))
+	return q
+}
+
+// 集合操作方法
+func (q *cypherQueryBuilder) Union() QueryBuilder {
+	q.finalizePendingClause()
+	q.addClause(types.UnionClause, "")
+	return q
+}
+
+func (q *cypherQueryBuilder) UnionAll() QueryBuilder {
+	q.finalizePendingClause()
+	q.addClause(types.UnionAllClause, "")
+	return q
+}
+
+// 高级功能方法
+func (q *cypherQueryBuilder) Use(database string) QueryBuilder {
+	q.finalizePendingClause()
+	q.addClause(types.UseClause, database)
+	return q
+}
+
+func (q *cypherQueryBuilder) ForEach(variable string, list interface{}, updateClauses ...string) QueryBuilder {
+	q.finalizePendingClause()
+	var listStr string
+	switch v := list.(type) {
+	case string:
+		listStr = v
+	case []interface{}:
+		paramName := q.generateParameterName("foreach_list")
+		q.parameters[paramName] = v
+		listStr = fmt.Sprintf("$%s", paramName)
+	default:
+		listStr = fmt.Sprintf("%v", v)
+	}
+	
+	clauseContent := fmt.Sprintf("(%s IN %s | %s)", variable, listStr, strings.Join(updateClauses, " "))
+	q.addClause(types.ForEachClause, clauseContent)
+	return q
+}
+
 func (q *cypherQueryBuilder) Build() (types.QueryResult, error) {
+	q.finalizePendingClause()
+	if len(q.errors) > 0 {
+		// Join all errors into one
+		var errStrings []string
+		for _, err := range q.errors {
+			errStrings = append(errStrings, err.Error())
+		}
+		return types.QueryResult{}, fmt.Errorf("%s", strings.Join(errStrings, "; "))
+	}
+
 	var parts []string
 	for _, clause := range q.clauses {
 		part := string(clause.Type)
@@ -229,7 +387,8 @@ func (q *cypherQueryBuilder) Build() (types.QueryResult, error) {
 	}, nil
 }
 
-// Validate 验证查询
+
+
 func (q *cypherQueryBuilder) Validate() []types.ValidationError {
 	var parts []string
 	for _, clause := range q.clauses {
@@ -240,6 +399,258 @@ func (q *cypherQueryBuilder) Validate() []types.ValidationError {
 		parts = append(parts, part)
 	}
 	query := strings.Join(parts, "\n")
-
 	return q.validator.Validate(query)
+}
+
+// --- Helper Methods ---
+
+func (q *cypherQueryBuilder) addClause(clauseType types.ClauseType, content string) {
+	q.clauses = append(q.clauses, types.Clause{
+		Type:    clauseType,
+		Content: content,
+	})
+}
+
+func (q *cypherQueryBuilder) buildEntityPattern(entity interface{}, variable string, clauseType types.ClauseType) (string, error) {
+	entityInfo, err := ParseEntity(entity)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse entity: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("(")
+	if variable != "" {
+		sb.WriteString(variable)
+	}
+	for _, label := range entityInfo.Labels {
+		sb.WriteString(":")
+		sb.WriteString(label)
+	}
+
+	// Only add properties for CREATE and MERGE clauses
+	if (clauseType == types.CreateClause || clauseType == types.MergeClause) && len(entityInfo.Properties) > 0 {
+		sb.WriteString(" {")
+		var props []string
+		
+		// Sort keys for deterministic order
+		keys := make([]string, 0, len(entityInfo.Properties))
+		for k := range entityInfo.Properties {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		
+		for _, k := range keys {
+			paramName := q.generateParameterName(k)
+			props = append(props, fmt.Sprintf("%s: $%s", k, paramName))
+			q.parameters[paramName] = entityInfo.Properties[k]
+		}
+		sb.WriteString(strings.Join(props, ", "))
+		sb.WriteString("}")
+	}
+
+	sb.WriteString(")")
+	return sb.String(), nil
+}
+
+func (q *cypherQueryBuilder) buildConditionString(condition types.Condition, sb *strings.Builder) {
+	switch c := condition.(type) {
+	case types.Predicate:
+		if c.Not {
+			sb.WriteString("NOT (")
+		}
+
+		prop := c.Property
+		// Don't modify property if it already contains a dot (already qualified)
+		// Only add current alias if property doesn't contain dot and we have a current alias
+		if !strings.Contains(prop, ".") && q.currentAlias != "" {
+			prop = fmt.Sprintf("%s.%s", q.currentAlias, prop)
+		}
+
+		if c.Operator == types.OpIsNull || c.Operator == types.OpIsNotNull {
+			sb.WriteString(fmt.Sprintf("%s %s", prop, c.Operator))
+		} else {
+			// Generate parameter name based on the full property (including alias if present)
+			paramName := q.generateParameterName(strings.ReplaceAll(prop, ".", "_"))
+			q.parameters[paramName] = c.Value
+			sb.WriteString(fmt.Sprintf("%s %s $%s", prop, c.Operator, paramName))
+		}
+
+		if c.Not {
+			sb.WriteString(")")
+		}
+
+	case types.LogicalGroup:
+		sb.WriteString("(")
+		for i, cond := range c.Conditions {
+			if i > 0 {
+				sb.WriteString(fmt.Sprintf(" %s ", c.Operator))
+			}
+			q.buildConditionString(cond, sb)
+		}
+		sb.WriteString(")")
+	case *types.LogicalGroup:
+		sb.WriteString("(")
+		for i, cond := range c.Conditions {
+			if i > 0 {
+				sb.WriteString(fmt.Sprintf(" %s ", c.Operator))
+			}
+			q.buildConditionString(cond, sb)
+		}
+		sb.WriteString(")")
+	}
+}
+
+func (q *cypherQueryBuilder) generateParameterName(base string) string {
+	q.paramCounter++
+	return fmt.Sprintf("%s_%d", strings.ReplaceAll(base, ".", "_"), q.paramCounter)
+}
+
+func (q *cypherQueryBuilder) formatExpressions(expressions ...interface{}) string {
+	var parts []string
+	for _, expr := range expressions {
+		switch v := expr.(type) {
+		case string:
+			parts = append(parts, v)
+		case Expression:
+			parts = append(parts, v.String())
+		default:
+			parts = append(parts, fmt.Sprintf("%v", v))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (q *cypherQueryBuilder) buildPatternString(pattern types.Pattern) string {
+	var sb strings.Builder
+	
+	// 起始节点
+	sb.WriteString(q.buildNodePatternString(pattern.StartNode))
+	
+	// 关系
+	sb.WriteString(q.buildRelationshipPatternString(pattern.Relationship))
+	
+	// 结束节点
+	sb.WriteString(q.buildNodePatternString(pattern.EndNode))
+	
+	return sb.String()
+}
+
+func (q *cypherQueryBuilder) buildNodePatternString(node types.NodePattern) string {
+	var sb strings.Builder
+	sb.WriteString("(")
+	
+	// 变量名
+	if node.Variable != "" {
+		sb.WriteString(node.Variable)
+	}
+	
+	// 标签
+	for _, label := range node.Labels {
+		sb.WriteString(":")
+		sb.WriteString(label)
+	}
+	
+	// 属性
+	if len(node.Properties) > 0 {
+		sb.WriteString(" {")
+		var props []string
+		
+		// 排序属性键以确保确定性
+		keys := make([]string, 0, len(node.Properties))
+		for k := range node.Properties {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		
+		for _, k := range keys {
+			paramName := q.generateParameterName(k)
+			props = append(props, fmt.Sprintf("%s: $%s", k, paramName))
+			q.parameters[paramName] = node.Properties[k]
+		}
+		sb.WriteString(strings.Join(props, ", "))
+		sb.WriteString("}")
+	}
+	
+	sb.WriteString(")")
+	return sb.String()
+}
+
+func (q *cypherQueryBuilder) buildRelationshipPatternString(rel types.RelationshipPattern) string {
+	var sb strings.Builder
+	
+	// 开始方向
+	switch rel.Direction {
+	case types.DirectionIncoming:
+		sb.WriteString("<-")
+	case types.DirectionOutgoing:
+		sb.WriteString("-")
+	case types.DirectionBoth:
+		sb.WriteString("-")
+	default:
+		sb.WriteString("-")
+	}
+	
+	sb.WriteString("[")
+	
+	// 变量名
+	if rel.Variable != "" {
+		sb.WriteString(rel.Variable)
+	}
+	
+	// 关系类型
+	if rel.Type != "" {
+		sb.WriteString(":")
+		sb.WriteString(rel.Type)
+	}
+	
+	// 变长路径
+	if rel.MinLength != nil || rel.MaxLength != nil {
+		sb.WriteString("*")
+		if rel.MinLength != nil {
+			sb.WriteString(fmt.Sprintf("%d", *rel.MinLength))
+		}
+		if rel.MaxLength != nil {
+			sb.WriteString("..")
+			sb.WriteString(fmt.Sprintf("%d", *rel.MaxLength))
+		} else if rel.MinLength != nil {
+			sb.WriteString("..")
+		}
+	}
+	
+	// 属性
+	if len(rel.Properties) > 0 {
+		sb.WriteString(" {")
+		var props []string
+		
+		// 排序属性键
+		keys := make([]string, 0, len(rel.Properties))
+		for k := range rel.Properties {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		
+		for _, k := range keys {
+			paramName := q.generateParameterName(k)
+			props = append(props, fmt.Sprintf("%s: $%s", k, paramName))
+			q.parameters[paramName] = rel.Properties[k]
+		}
+		sb.WriteString(strings.Join(props, ", "))
+		sb.WriteString("}")
+	}
+	
+	sb.WriteString("]")
+	
+	// 结束方向
+	switch rel.Direction {
+	case types.DirectionIncoming:
+		sb.WriteString("-")
+	case types.DirectionOutgoing:
+		sb.WriteString("->")
+	case types.DirectionBoth:
+		sb.WriteString("-")
+	default:
+		sb.WriteString("->")
+	}
+	
+	return sb.String()
 }

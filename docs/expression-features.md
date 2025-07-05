@@ -14,10 +14,10 @@
 
 ```go
 // 示例
-builder.Eq("u.age", 25)              // u.age = 25
-builder.Gt("u.salary", 50000)        // u.salary > 50000
-builder.Like("u.name", "john")       // u.name CONTAINS 'john'
-builder.InList("u.status", 1, 2, 3)  // u.status IN [1, 2, 3]
+builder.Eq("age", 25)              // u.age = $age_1 (假设别名为 u)
+builder.Gt("salary", 50000)        // u.salary > $salary_2
+builder.Contains("name", "john")   // u.name CONTAINS $name_3
+builder.In("status", 1, 2, 3)      // u.status IN $status_4
 ```
 
 ### 2. 聚合函数 (Aggregating Functions)
@@ -123,8 +123,11 @@ caseExpr := builder.NewCase().
     End().BuildAs("age_category")
 ```
 
-#### 表达式构建器
+#### 表达式构建器 (已废弃)
+**注意**: `ExpressionBuilder` 是一个较旧的、已废弃的特性。推荐使用新的基于函数的方法（例如 `builder.Eq()`）来构建条件。
+
 ```go
+// 旧版 ExpressionBuilder
 expr := builder.NewExpression().
     Property("u.age").
     GreaterThan(18).
@@ -134,12 +137,12 @@ expr := builder.NewExpression().
 
 #### 逻辑操作符组合
 ```go
-condition := builder.AndConditions(
+condition := builder.And(
     builder.Gt("u.age", 18),
     builder.Eq("u.active", true),
-    builder.OrConditions(
-        builder.Like("u.email", "@company.com"),
-        builder.Eq("u.department", "'IT'"),
+    builder.Or(
+        builder.Contains("u.email", "@company.com"),
+        builder.Eq("u.department", "IT"),
     ),
 )
 ```
@@ -148,14 +151,17 @@ condition := builder.AndConditions(
 
 ### 复杂查询示例
 ```go
-qb := builder.NewQueryBuilder(registry)
+qb := builder.NewQueryBuilder()
+user := &User{} // 假设 User struct 已定义
+
 result, _ := qb.
-    Match("(u:User)").
-    Where(builder.AndConditions(
-        builder.Between("u.age", 25, 65),
-        builder.Like("u.email", "@company.com"),
-        builder.InList("u.department", "'IT'", "'Engineering'", "'Data'"),
-    )).
+    Match(user).As("u").
+    Where(
+        builder.Gt("age", 25),
+        builder.Lt("age", 65),
+        builder.Contains("email", "@company.com"),
+        builder.In("department", "IT", "Engineering", "Data"),
+    ).
     With(
         "u",
         builder.NewCase().
@@ -169,7 +175,6 @@ result, _ := qb.
         "u.department",
         "level",
         builder.Round("u.salary / 12").BuildAs("monthly_salary"),
-        builder.Count("u").BuildAs("count"),
     ).
     OrderBy("level", "u.department").
     Build()

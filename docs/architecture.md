@@ -40,7 +40,7 @@
 ### 1. 查询构建器 (Builder)
 **目标**: 专注于第一和第二阶段功能
 - **QueryBuilder**: 主查询构建器，支持流畅接口
-- **NodeBuilder**: 节点模式构建
+- **EntityClauseBuilder**: 实体子句构建器，用于处理 `.As()` 别名
 - **RelationshipBuilder**: 关系模式构建
 - **ClauseBuilder**: Cypher 子句构建
 
@@ -74,26 +74,19 @@
 norm/
 ├── builder/              # 查询构建器
 │   ├── query.go         # 主查询构建器
-│   ├── node.go          # 节点构建器
-│   ├── relationship.go  # 关系构建器
-│   ├── expression.go    # 表达式构建器
 │   ├── entity.go        # 实体解析器
-│   └── types.go         # 构建器类型定义
+│   ├── expression.go    # 表达式构建器
+│   ├── relationship.go  # 关系构建器 (暂未实现)
+│   └── types.go         # 构建器相关的类型 (暂未实现)
 ├── types/               # 类型系统
 │   ├── core.go          # 核心类型定义
-│   ├── converter.go     # 类型转换器
-│   └── validator.go     # 类型验证器
-├── validator/           # 验证系统 (第二阶段)
-│   ├── query.go         # 查询验证
-│   ├── structure.go     # 结构验证
-│   └── parameter.go     # 参数验证
-├── parser/              # 解析系统 (第二阶段)
-│   ├── cypher.go        # Cypher 解析
-│   ├── pattern.go       # 模式解析
-│   └── expression.go    # 表达式解析
-├── examples/            # 使用示例
-│   └── main.go
-├── tests/               # 测试文件
+│   ├── predicate.go     # WHERE 条件谓词
+│   └── converter.go     # 类型转换器 (暂未实现)
+├── validator/           # 验证系统
+│   ├── query.go         # 查询验证器
+│   └── query_test.go    # 查询验证器测试
+├── tests/               # 集成测试
+│   └── query_builder_test.go
 └── docs/                # 文档
 ```
 
@@ -102,48 +95,59 @@ norm/
 ### 查询构建器接口
 ```go
 type QueryBuilder interface {
-    // 基本子句
-    Match(pattern string) QueryBuilder
-    OptionalMatch(pattern string) QueryBuilder
-    Create(pattern string) QueryBuilder
-    Merge(pattern string) QueryBuilder
-    Where(condition string) QueryBuilder
+    // 实体和模式子句
+    Match(patternOrEntity interface{}) QueryBuilder
+    OptionalMatch(patternOrEntity interface{}) QueryBuilder
+    Create(patternOrEntity interface{}) QueryBuilder
+    Merge(patternOrEntity interface{}) QueryBuilder
+    As(alias string) QueryBuilder
+
+    // 数据更新子句
+    Set(property string, value interface{}) QueryBuilder
+    Remove(property string) QueryBuilder
+    RemoveLabel(labels ...string) QueryBuilder
+    Delete(aliases ...string) QueryBuilder
+    DetachDelete(aliases ...string) QueryBuilder
+
+    // 条件子句
+    Where(conditions ...types.Condition) QueryBuilder
+    WhereString(condition string) QueryBuilder // 兼容旧版
+
+    // 表达式和数据处理
     Return(expressions ...interface{}) QueryBuilder
     With(expressions ...interface{}) QueryBuilder
-    
-    // 排序和限制
+    Unwind(list interface{}, alias string) QueryBuilder
+
+    // 排序、限制和集合操作
     OrderBy(fields ...string) QueryBuilder
     Skip(count int) QueryBuilder
     Limit(count int) QueryBuilder
+    Union() QueryBuilder
+    UnionAll() QueryBuilder
+
+    // 子查询和高级功能
+    Call(subQuery QueryBuilder) QueryBuilder
+    ForEach(identifier string, list interface{}, innerQuery QueryBuilder) QueryBuilder
     
     // 参数操作
     SetParameter(key string, value interface{}) QueryBuilder
     
-    // 构建操作
-    Build() (QueryResult, error)
-    Validate() []ValidationError
-    
-    // 实体操作 (无需预注册)
-    MatchEntity(entity interface{}) QueryBuilder
-    CreateEntity(entity interface{}) QueryBuilder
-    MergeEntity(entity interface{}) QueryBuilder
+    // 构建和验证
+    Build() (types.QueryResult, error)
+    Validate() []types.ValidationError
 }
-
-// 表达式别名辅助函数
-func As(expression, alias string) Expression
 ```
 
 ### 实体解析接口
 ```go
+// EntityInfo 存储从实体中解析出的信息
 type EntityInfo struct {
     Labels     []string
     Properties map[string]interface{}
 }
 
-// 直接解析结构体实例，无需预注册
+// ParseEntity 直接从结构体实例解析标签和属性信息
 func ParseEntity(entity interface{}) (*EntityInfo, error)
-    Validate(entity interface{}) error
-}
 ```
 
 ### 查询结果接口
