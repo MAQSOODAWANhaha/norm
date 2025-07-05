@@ -8,16 +8,6 @@ import (
 	"norm/builder"
 )
 
-// User is a test struct for entity-based queries
-type User struct {
-	_		struct{} `cypher:"label:User,Person"`
-	ID		int64	`cypher:"id,omitempty"`
-	Username string	`cypher:"username"`
-	Email	string	`cypher:"email"`
-	Active	bool	`cypher:"active"`
-	Age		int	`cypher:"age,omitempty"`
-}
-
 func TestQueryBuilder(t *testing.T) {
 	t.Run("Basic Create Entity", func(t *testing.T) {
 		user := &User{Username: "testuser", Email: "test@example.com", Active: true}
@@ -76,3 +66,4 @@ func TestQueryBuilder_Set(t *testing.T) {
 		}
 	})
 }
+

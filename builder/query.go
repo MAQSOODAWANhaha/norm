@@ -26,9 +26,11 @@ type QueryBuilder interface {
 	
 	// 数据修改
 	Set(assignments ...string) QueryBuilder
-	Delete(variables ...string) QueryBuilder
-	DetachDelete(variables ...string) QueryBuilder
+	SetEntity(entity interface{}, alias string) QueryBuilder
+	Delete(variables ...interface{}) QueryBuilder
+	DetachDelete(variables ...interface{}) QueryBuilder
 	Remove(items ...string) QueryBuilder
+	RemoveProperties(entity interface{}, alias string, properties ...string) QueryBuilder
 	
 	// MERGE 条件动作
 	OnCreate(assignments ...string) QueryBuilder
@@ -71,6 +73,7 @@ type cypherQueryBuilder struct {
 	currentAlias  string
 	pendingEntity interface{}
 	pendingClause types.ClauseType
+	entityAliases map[string]interface{}
 	validator     validator.QueryValidator
 	errors        []error
 }
@@ -78,11 +81,12 @@ type cypherQueryBuilder struct {
 // NewQueryBuilder creates a new instance of the query builder.
 func NewQueryBuilder() QueryBuilder {
 	return &cypherQueryBuilder{
-		clauses:      make([]types.Clause, 0),
-		parameters:   make(map[string]interface{}),
-		paramCounter: 0,
-		validator:    validator.NewQueryValidator(true),
-		errors:       make([]error, 0),
+		clauses:       make([]types.Clause, 0),
+		parameters:    make(map[string]interface{}),
+		paramCounter:  0,
+		entityAliases: make(map[string]interface{}),
+		validator:     validator.NewQueryValidator(true),
+		errors:        make([]error, 0),
 	}
 }
 
@@ -118,12 +122,11 @@ func (q *cypherQueryBuilder) Merge(p interface{}) QueryBuilder {
 // As sets the alias for a pending entity clause.
 func (q *cypherQueryBuilder) As(alias string) QueryBuilder {
 	if q.pendingEntity == nil {
-		// If there's no pending entity, this might be an alias for a subquery or other complex part.
-		// For now, we just set the alias for the next clauses.
 		q.currentAlias = alias
 		return q
 	}
 	q.currentAlias = alias
+	q.entityAliases[alias] = q.pendingEntity
 	q.finalizePendingClause()
 	return q
 }
@@ -131,6 +134,27 @@ func (q *cypherQueryBuilder) As(alias string) QueryBuilder {
 func (q *cypherQueryBuilder) Set(assignments ...string) QueryBuilder {
 	q.finalizePendingClause()
 	q.addClause(types.SetClause, strings.Join(assignments, ", "))
+	return q
+}
+
+func (q *cypherQueryBuilder) SetEntity(entity interface{}, alias string) QueryBuilder {
+	q.finalizePendingClause()
+	props, err := ParseEntityForUpdate(entity)
+	if err != nil {
+		q.errors = append(q.errors, err)
+		return q
+	}
+
+	var assignments []string
+	for key, value := range props {
+		paramName := q.generateParameterName(key)
+		assignments = append(assignments, fmt.Sprintf("%s.%s = $%s", alias, key, paramName))
+		q.parameters[paramName] = value
+	}
+
+	if len(assignments) > 0 {
+		q.addClause(types.SetClause, strings.Join(assignments, ", "))
+	}
 	return q
 }
 
@@ -261,15 +285,15 @@ func (q *cypherQueryBuilder) MergePattern(pattern types.Pattern) QueryBuilder {
 }
 
 // 数据修改方法
-func (q *cypherQueryBuilder) Delete(variables ...string) QueryBuilder {
+func (q *cypherQueryBuilder) Delete(variables ...interface{}) QueryBuilder {
 	q.finalizePendingClause()
-	q.addClause(types.DeleteClause, strings.Join(variables, ", "))
+	q.addClause(types.DeleteClause, q.formatDeleteVariables(variables...))
 	return q
 }
 
-func (q *cypherQueryBuilder) DetachDelete(variables ...string) QueryBuilder {
+func (q *cypherQueryBuilder) DetachDelete(variables ...interface{}) QueryBuilder {
 	q.finalizePendingClause()
-	q.addClause(types.DetachDeleteClause, strings.Join(variables, ", "))
+	q.addClause(types.DetachDeleteClause, q.formatDeleteVariables(variables...))
 	return q
 }
 
@@ -278,6 +302,33 @@ func (q *cypherQueryBuilder) Remove(items ...string) QueryBuilder {
 	q.addClause(types.RemoveClause, strings.Join(items, ", "))
 	return q
 }
+
+func (q *cypherQueryBuilder) RemoveProperties(entity interface{}, alias string, properties ...string) QueryBuilder {
+	q.finalizePendingClause()
+	var itemsToRemove []string
+	if len(properties) == 0 {
+		// Remove all properties from the entity
+		props, err := ParseEntityForReturn(entity, "")
+		if err != nil {
+			q.errors = append(q.errors, err)
+			return q
+		}
+		for _, prop := range props {
+			itemsToRemove = append(itemsToRemove, fmt.Sprintf("%s.%s", alias, prop))
+		}
+	} else {
+		// Remove specified properties
+		for _, prop := range properties {
+			itemsToRemove = append(itemsToRemove, fmt.Sprintf("%s.%s", alias, prop))
+		}
+	}
+
+	if len(itemsToRemove) > 0 {
+		q.addClause(types.RemoveClause, strings.Join(itemsToRemove, ", "))
+	}
+	return q
+}
+
 
 // MERGE 条件动作方法
 func (q *cypherQueryBuilder) OnCreate(assignments ...string) QueryBuilder {
@@ -513,12 +564,46 @@ func (q *cypherQueryBuilder) formatExpressions(expressions ...interface{}) strin
 			parts = append(parts, v)
 		case Expression:
 			parts = append(parts, v.String())
+		case types.Entity:
+			props, err := ParseEntityForReturn(v.Struct, v.Alias)
+			if err != nil {
+				q.errors = append(q.errors, err)
+				continue
+			}
+			parts = append(parts, props...)
 		default:
 			parts = append(parts, fmt.Sprintf("%v", v))
 		}
 	}
 	return strings.Join(parts, ", ")
 }
+
+func (q *cypherQueryBuilder) formatDeleteVariables(variables ...interface{}) string {
+	var parts []string
+	for _, v := range variables {
+		switch val := v.(type) {
+		case string:
+			parts = append(parts, val)
+		case types.Entity:
+			parts = append(parts, val.Alias)
+		default:
+			// Attempt to find alias by struct type if not explicitly provided
+			found := false
+			for alias, entity := range q.entityAliases {
+				if entity == val {
+					parts = append(parts, alias)
+					found = true
+					break
+				}
+			}
+			if !found {
+				q.errors = append(q.errors, fmt.Errorf("could not find alias for entity to delete: %T", val))
+			}
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 
 func (q *cypherQueryBuilder) buildPatternString(pattern types.Pattern) string {
 	var sb strings.Builder
@@ -581,7 +666,7 @@ func (q *cypherQueryBuilder) buildRelationshipPatternString(rel types.Relationsh
 	// 开始方向
 	switch rel.Direction {
 	case types.DirectionIncoming:
-		sb.WriteString("<-")
+		sb.WriteString("<-<")
 	case types.DirectionOutgoing:
 		sb.WriteString("-")
 	case types.DirectionBoth:
@@ -610,10 +695,10 @@ func (q *cypherQueryBuilder) buildRelationshipPatternString(rel types.Relationsh
 			sb.WriteString(fmt.Sprintf("%d", *rel.MinLength))
 		}
 		if rel.MaxLength != nil {
-			sb.WriteString("..")
+			sb.WriteString("..<")
 			sb.WriteString(fmt.Sprintf("%d", *rel.MaxLength))
 		} else if rel.MinLength != nil {
-			sb.WriteString("..")
+			sb.WriteString("..<")
 		}
 	}
 	

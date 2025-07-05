@@ -13,7 +13,7 @@ type RelationshipBuilder interface {
 	// 基本关系构建
 	Type(relType string) RelationshipBuilder
 	Variable(variable string) RelationshipBuilder
-	Direction(direction types.Direction) RelationshipBuilder
+	Direction(direction types.RelationshipDirection) RelationshipBuilder
 	Properties(properties map[string]interface{}) RelationshipBuilder
 	
 	// 变长路径
@@ -53,7 +53,7 @@ func (rb *relationshipBuilder) Variable(variable string) RelationshipBuilder {
 }
 
 // Direction 设置关系方向
-func (rb *relationshipBuilder) Direction(direction types.Direction) RelationshipBuilder {
+func (rb *relationshipBuilder) Direction(direction types.RelationshipDirection) RelationshipBuilder {
 	rb.pattern.Direction = direction
 	return rb
 }
@@ -201,7 +201,7 @@ func (pb *patternBuilder) Build() types.Pattern {
 	return pb.pattern
 }
 
-// String 生成完整模式字符串
+// String 生���完整模式字符串
 func (pb *patternBuilder) String() string {
 	var sb strings.Builder
 	

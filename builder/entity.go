@@ -73,6 +73,92 @@ func ParseEntity(entity interface{}) (*EntityInfo, error) {
 	return info, nil
 }
 
+// ParseEntityForUpdate 解析实体以进行更新操作
+func ParseEntityForUpdate(entity interface{}) (map[string]interface{}, error) {
+	val := reflect.ValueOf(entity)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("entity must be a struct or a pointer to a struct")
+	}
+	typ := val.Type()
+
+	props := make(map[string]interface{})
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		fieldVal := val.Field(i)
+
+		if field.Name == "_" || !fieldVal.CanInterface() {
+			continue
+		}
+
+		tag := field.Tag.Get("cypher")
+		if tag == "" || tag == "-" {
+			continue
+		}
+
+		parts := strings.Split(tag, ",")
+		propName := parts[0]
+		if propName == "" {
+			propName = strings.ToLower(field.Name)
+		}
+		
+		isOmitEmpty := false
+		for _, part := range parts {
+			if part == "omitempty" {
+				isOmitEmpty = true
+				break
+			}
+		}
+
+		if isOmitEmpty && isZero(fieldVal) {
+			continue
+		}
+
+		props[propName] = fieldVal.Interface()
+	}
+	return props, nil
+}
+
+// ParseEntityForReturn 解析实体以进行返回操作
+func ParseEntityForReturn(entity interface{}, alias string) ([]string, error) {
+	val := reflect.ValueOf(entity)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("entity must be a struct or a pointer to a struct")
+	}
+	typ := val.Type()
+
+	var props []string
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if field.Name == "_" {
+			continue
+		}
+
+		tag := field.Tag.Get("cypher")
+		if tag == "" || tag == "-" {
+			continue
+		}
+
+		propName := strings.Split(tag, ",")[0]
+		if propName == "" {
+			propName = strings.ToLower(field.Name)
+		}
+
+		if alias != "" {
+			props = append(props, fmt.Sprintf("%s.%s", alias, propName))
+		} else {
+			props = append(props, propName)
+		}
+	}
+	return props, nil
+}
+
+
 // parseLabels 从类型中解析标签
 func parseLabels(typ reflect.Type) []string {
 	if field, ok := typ.FieldByName("_"); ok {
@@ -84,7 +170,7 @@ func parseLabels(typ reflect.Type) []string {
 	return []string{typ.Name()}
 }
 
-// isZero 检查一个 reflect.Value 是否为其类型的零值
+// isZero 检查一个 reflect.Value 是���为其类型的零值
 func isZero(v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
