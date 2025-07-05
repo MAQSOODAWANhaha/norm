@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"norm/types"
 )
 
 // EntityInfo 存储解析后的实体信息
 type EntityInfo struct {
-	Labels     []string
+	Labels     types.Labels
 	Properties map[string]interface{}
 }
 
@@ -103,7 +105,7 @@ func ParseEntityForUpdate(entity interface{}) (map[string]interface{}, error) {
 		if propName == "" {
 			propName = strings.ToLower(field.Name)
 		}
-		
+
 		isOmitEmpty := false
 		for _, part := range parts {
 			if part == "omitempty" {
@@ -158,16 +160,33 @@ func ParseEntityForReturn(entity interface{}, alias string) ([]string, error) {
 	return props, nil
 }
 
+// parseLabels 从类型中解析标签，支持多标签和默认标签生成
+func parseLabels(typ reflect.Type) types.Labels {
+	var labels types.Labels
 
-// parseLabels 从类型中解析标签
-func parseLabels(typ reflect.Type) []string {
 	if field, ok := typ.FieldByName("_"); ok {
 		tag := field.Tag.Get("cypher")
 		if strings.HasPrefix(tag, "label:") {
-			return strings.Split(strings.TrimPrefix(tag, "label:"), ",")
+			labelStr := strings.TrimPrefix(tag, "label:")
+			parts := strings.Split(labelStr, ",")
+			for _, part := range parts {
+				l := types.Label(strings.TrimSpace(part))
+				if l.IsValid() {
+					labels.Add(l)
+				}
+			}
 		}
 	}
-	return []string{typ.Name()}
+
+	// 如果没有从标签中解析到有效标签，则使用结构体名称作为默认标签
+	if len(labels) == 0 {
+		defaultLabel := types.Label(typ.Name())
+		if defaultLabel.IsValid() {
+			labels.Add(defaultLabel)
+		}
+	}
+
+	return labels
 }
 
 // isZero 检查一个 reflect.Value 是���为其类型的零值

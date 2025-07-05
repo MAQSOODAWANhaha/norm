@@ -231,7 +231,7 @@ func (pb *patternBuilder) buildNodeString(node types.NodePattern) string {
 	// 标签
 	for _, label := range node.Labels {
 		sb.WriteString(":")
-		sb.WriteString(label)
+		sb.WriteString(string(label))
 	}
 	
 	// 属性 (简化处理)
@@ -282,7 +282,7 @@ func VarLengthBidirectional(relType string, min, max int) RelationshipBuilder {
 }
 
 // Node 创建节点模式
-func Node(variable string, labels ...string) types.NodePattern {
+func Node(variable string, labels ...types.Label) types.NodePattern {
 	return types.NodePattern{
 		Variable: variable,
 		Labels:   labels,
@@ -290,7 +290,7 @@ func Node(variable string, labels ...string) types.NodePattern {
 }
 
 // NodeWithProps 创建带属性的节点模式
-func NodeWithProps(variable string, labels []string, properties map[string]interface{}) types.NodePattern {
+func NodeWithProps(variable string, labels types.Labels, properties map[string]interface{}) types.NodePattern {
 	return types.NodePattern{
 		Variable:   variable,
 		Labels:     labels,

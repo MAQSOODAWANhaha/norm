@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"norm/builder"
+
 	"norm/types"
 )
 
@@ -48,7 +49,7 @@ func TestRelationshipBuilder(t *testing.T) {
 					Type("KNOWS").
 					Variable("r").
 					Properties(map[string]interface{}{
-						"since": 2020,
+						"since":  2020,
 						"weight": 0.8,
 					})
 			},
@@ -70,10 +71,10 @@ func TestRelationshipBuilder(t *testing.T) {
 			result := tt.builder().String()
 			if tt.expected == "relationship with properties" {
 				// For properties test, check key components
-				if !containsString(result, "-[r:KNOWS") || 
-				   !containsString(result, "since: 2020") ||
-				   !containsString(result, "weight: 0.8") ||
-				   !containsString(result, "]->") {
+				if !containsString(result, "-[r:KNOWS") ||
+					!containsString(result, "since: 2020") ||
+					!containsString(result, "weight: 0.8") ||
+					!containsString(result, "]->") {
 					t.Errorf("Expected relationship with properties, got %q", result)
 				}
 			} else if result != tt.expected {
@@ -93,9 +94,9 @@ func TestPatternBuilder(t *testing.T) {
 			name: "Simple node to node relationship",
 			pattern: func() types.Pattern {
 				return builder.NewPatternBuilder().
-					StartNode(builder.Node("a", "User")).
+					StartNode(builder.Node("a", types.Label("User"))).
 					Relationship(builder.Outgoing("KNOWS").Build()).
-					EndNode(builder.Node("b", "User")).
+					EndNode(builder.Node("b", types.Label("User"))).
 					Build()
 			},
 			expected: "(a:User)-[:KNOWS]->(b:User)",
@@ -103,10 +104,10 @@ func TestPatternBuilder(t *testing.T) {
 		{
 			name: "Complex pattern with properties",
 			pattern: func() types.Pattern {
-				startNode := builder.NodeWithProps("u", []string{"User"}, map[string]interface{}{
+				startNode := builder.NodeWithProps("u", types.Labels{"User"}, map[string]interface{}{
 					"active": true,
 				})
-				
+
 				rel := builder.NewRelationshipBuilder().
 					Type("CREATED").
 					Variable("r").
@@ -114,9 +115,9 @@ func TestPatternBuilder(t *testing.T) {
 						"timestamp": "2024-01-01",
 					}).
 					Build()
-				
-				endNode := builder.Node("p", "Post")
-				
+
+				endNode := builder.Node("p", types.Label("Post"))
+
 				return builder.NewPatternBuilder().
 					StartNode(startNode).
 					Relationship(rel).
@@ -134,7 +135,7 @@ func TestPatternBuilder(t *testing.T) {
 				StartNode(pattern.StartNode).
 				Relationship(pattern.Relationship).
 				EndNode(pattern.EndNode)
-			
+
 			result := pb.String()
 			// Note: The actual result might have different property ordering due to map iteration
 			// In a real test, we'd need to normalize or use a more sophisticated comparison
@@ -157,16 +158,16 @@ func TestQueryBuilderWithPatterns(t *testing.T) {
 			name: "Match with relationship pattern",
 			query: func() string {
 				pattern := types.Pattern{
-					StartNode: builder.Node("u", "User"),
+					StartNode:    builder.Node("u", types.Label("User")),
 					Relationship: builder.Outgoing("KNOWS").Variable("r").Build(),
-					EndNode: builder.Node("f", "User"),
+					EndNode:      builder.Node("f", types.Label("User")),
 				}
-				
+
 				result, _ := builder.NewQueryBuilder().
 					MatchPattern(pattern).
 					Return("u.name", "f.name").
 					Build()
-				
+
 				return result.Query
 			},
 			expected: "MATCH",
@@ -175,15 +176,15 @@ func TestQueryBuilderWithPatterns(t *testing.T) {
 			name: "Create with variable length relationship",
 			query: func() string {
 				pattern := types.Pattern{
-					StartNode: builder.Node("a", "Person"),
+					StartNode:    builder.Node("a", types.Label("Person")),
 					Relationship: builder.VarLengthOutgoing("KNOWS", 1, 3).Build(),
-					EndNode: builder.Node("b", "Person"),
+					EndNode:      builder.Node("b", types.Label("Person")),
 				}
-				
+
 				result, _ := builder.NewQueryBuilder().
 					CreatePattern(pattern).
 					Build()
-				
+
 				return result.Query
 			},
 			expected: "CREATE",
@@ -207,107 +208,107 @@ func TestAdvancedQueryStructures(t *testing.T) {
 			Username: "john_doe",
 			Email:    "john@example.com",
 		}
-		
+
 		result, err := builder.NewQueryBuilder().
 			Merge(user).As("u").
 			OnCreate("u.created = timestamp()", "u.status = 'new'").
 			OnMatch("u.lastSeen = timestamp()", "u.status = 'active'").
 			Return("u").
 			Build()
-		
+
 		if err != nil {
 			t.Fatalf("Error building query: %v", err)
 		}
-		
+
 		expectedClauses := []string{"MERGE", "ON CREATE", "ON MATCH", "RETURN"}
 		for _, clause := range expectedClauses {
 			if !containsString(result.Query, clause) {
 				t.Errorf("Query should contain %s clause", clause)
 			}
 		}
-		
+
 		t.Logf("Generated MERGE query: %s", result.Query)
 	})
-	
+
 	t.Run("UNWIND with list", func(t *testing.T) {
 		names := []interface{}{"Alice", "Bob", "Charlie"}
-		
+
 		result, err := builder.NewQueryBuilder().
 			Unwind(names, "name").
 			Create("(u:User {name: name})").
 			Return("u").
 			Build()
-		
+
 		if err != nil {
 			t.Fatalf("Error building query: %v", err)
 		}
-		
+
 		if !containsString(result.Query, "UNWIND") {
 			t.Error("Query should contain UNWIND clause")
 		}
-		
+
 		if result.Parameters["list_1"] == nil {
 			t.Error("Query should have parameterized list")
 		}
-		
+
 		t.Logf("Generated UNWIND query: %s", result.Query)
 		t.Logf("Parameters: %v", result.Parameters)
 	})
-	
+
 	t.Run("Complex query with UNION", func(t *testing.T) {
 		qb1 := builder.NewQueryBuilder().
 			Match("(u:User)").
 			Return("u.name AS name", "'User' AS type")
-		
+
 		result1, _ := qb1.Build()
-		
+
 		qb2 := builder.NewQueryBuilder().
 			Match("(c:Company)").
 			Return("c.name AS name", "'Company' AS type")
-		
+
 		result2, _ := qb2.Build()
-		
+
 		// Simulate UNION by combining queries
 		unionQuery := result1.Query + "\nUNION\n" + result2.Query
-		
+
 		if !containsString(unionQuery, "UNION") {
 			t.Error("Union query should contain UNION clause")
 		}
-		
+
 		t.Logf("Generated UNION query: %s", unionQuery)
 	})
-	
+
 	t.Run("Query with USE database", func(t *testing.T) {
 		result, err := builder.NewQueryBuilder().
 			Use("mydb").
 			Match("(n)").
 			Return("count(n)").
 			Build()
-		
+
 		if err != nil {
 			t.Fatalf("Error building query: %v", err)
 		}
-		
+
 		if !containsString(result.Query, "USE mydb") {
 			t.Error("Query should contain USE clause")
 		}
-		
+
 		t.Logf("Generated USE query: %s", result.Query)
 	})
 }
 
 // Helper types and functions
 type testUser struct {
-	_ struct{} `cypher:"label:User"`
-	Username string `cypher:"username"`
-	Email    string `cypher:"email"`
+	_        struct{} `cypher:"label:User"`
+	Username string   `cypher:"username"`
+	Email    string   `cypher:"email"`
 }
 
 func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || 
-		(len(s) > len(substr) && (s[:len(substr)] == substr || 
-		s[len(s)-len(substr):] == substr ||
-		containsSubstring(s, substr))))
+	return len(s) >= len(substr) && (s == substr ||
+		(len(s) > len(substr) && (s[:len(substr)] == substr ||
+			s[len(s)-len(substr):] == substr ||
+			containsSubstring(s, substr))))
 }
 
 func containsSubstring(s, substr string) bool {

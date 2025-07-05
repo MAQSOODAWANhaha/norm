@@ -123,7 +123,8 @@ ORM 支持通过 struct tag 来自定义节点标签和属性。
 
 ```go
 type User struct {
-    // 使用 "label" 标签指定一个或多个节点标签
+    // 使用 "label" 标签指定一个或多个节点标签，用逗号分隔。
+    // 如果省略此标签，将自动使用结构体名称作为默认标签。
     _        struct{} `cypher:"label:User,Person"`
     
     // 字段名默认为属性名的小写形式
@@ -135,6 +136,13 @@ type User struct {
     // 使用 "-" 标签完全忽略该字段
     Password string   `cypher:"-"`
 }
+
+// 示例：没有明确指定标签的结构体将自动获得 "Product" 标签
+type Product struct {
+    _          struct{}
+    ProductID  string `cypher:"product_id"`
+    Name       string `cypher:"name"`
+}
 ```
 
 #### 解析流程
@@ -142,8 +150,8 @@ type User struct {
 1. **`ParseEntity`** 接收一个实体。
 2. **`parseLabels`** 被调用来解析标签：
    - 它会查找一个名为 `_` 的匿名空结构体字段。
-   - 如果该字段存在并且有 `cypher:"label:..."` 标签，它会提取这些标签。
-   - 否则，它会使用 struct 的类型名作为默认标签。
+   - 如果该字段存在并且有 `cypher:"label:..."` 标签，它会提取这些标签，并支持逗号分隔的多个标签。
+   - 如果没有找到 `cypher:"label:..."` 标签，或者标签中没有指定有效标签，它将使用 struct 的类型名作为默认标签。
 3. **`ParseEntity`** 遍历所有字段：
    - 它会读取 `cypher` 标签来确定属性名。如果标签为空，则使用字段名的小写形式。
    - 如果标签包含 `omitempty`，则在字段为零值时忽略该属性。
@@ -222,7 +230,8 @@ package main
 
 import (
 	"fmt"
-	"norm/builder"
+	"github.com/opt/go/norm/builder"
+	"github.com/opt/go/norm/types"
 )
 
 // 定义实体

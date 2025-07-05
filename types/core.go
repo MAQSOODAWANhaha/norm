@@ -64,10 +64,57 @@ type Pattern struct {
 	EndNode      NodePattern
 }
 
+// Label represents a single node label.
+type Label string
+
+// IsValid checks if the label is valid (non-empty).
+func (l Label) IsValid() bool {
+	return len(l) > 0
+}
+
+// Labels represents a collection of node labels.
+type Labels []Label
+
+// Contains checks if the collection contains a specific label.
+func (ls Labels) Contains(label Label) bool {
+	for _, l := range ls {
+		if l == label {
+			return true
+		}
+	}
+	return false
+}
+
+// Add adds a label to the collection if it's not already present and is valid.
+func (ls *Labels) Add(label Label) {
+	if label.IsValid() && !ls.Contains(label) {
+		*ls = append(*ls, label)
+	}
+}
+
+// Remove removes a label from the collection.
+func (ls *Labels) Remove(label Label) {
+	for i, l := range *ls {
+		if l == label {
+			*ls = append((*ls)[:i], (*ls)[i+1:]...)
+			return
+		}
+	}
+}
+
+// ToStrings converts the Labels collection to a slice of strings.
+func (ls Labels) ToStrings() []string {
+	s := make([]string, len(ls))
+	for i, l := range ls {
+		s[i] = string(l)
+	}
+	return s
+}
+
 // NodePattern represents a node in a pattern.
 type NodePattern struct {
 	Variable   string
-	Labels     []string
+	Labels     Labels
 	Properties map[string]interface{}
 }
 

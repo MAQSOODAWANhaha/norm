@@ -475,7 +475,7 @@ func (q *cypherQueryBuilder) buildEntityPattern(entity interface{}, variable str
 	}
 	for _, label := range entityInfo.Labels {
 		sb.WriteString(":")
-		sb.WriteString(label)
+		sb.WriteString(string(label))
 	}
 
 	// Only add properties for CREATE and MERGE clauses
@@ -632,7 +632,7 @@ func (q *cypherQueryBuilder) buildNodePatternString(node types.NodePattern) stri
 	// 标签
 	for _, label := range node.Labels {
 		sb.WriteString(":")
-		sb.WriteString(label)
+		sb.WriteString(string(label))
 	}
 	
 	// 属性

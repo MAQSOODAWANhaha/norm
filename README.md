@@ -112,8 +112,9 @@ map[p1:25 p2:true]
 
 使用 `cypher` 结构体标签来控制结构体如何映射到 Cypher 节点。
 
-- `label`: 指定节点标签。如果省略，则使用结构体名称。
-  - `cypher:"label:User,Person"`
+- `label`: 指定节点标签。支持多标签，用逗号分隔。如果省略，则使用结构体名称作为默认标签。
+  - `cypher:"label:User,Person"` (多标签示例)
+  - `type MyNode struct { _ struct{} }` (将自动生成 `MyNode` 标签)
 - `property_name`: 覆盖默认的属性名称（默认为小写的字段名）。
   - `cypher:"username"`
 - `omitempty`: 如果字段为零值（例如 `0`, `""`, `false`），则在查询中排除该字段。

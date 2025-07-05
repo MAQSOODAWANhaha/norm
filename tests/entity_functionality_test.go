@@ -5,16 +5,50 @@ import (
 	"testing"
 
 	"norm/builder"
+
 	"norm/types"
+
 	"github.com/stretchr/testify/assert"
 )
 
+// TestUser struct for testing purposes
+type TestUser struct {
+	_        struct{} `cypher:"label:TestUser,Active"`
+	Username string   `cypher:"username"`
+	Email    string   `cypher:"email"`
+	Age      int      `cypher:"age"`
+}
 
+// TestDefaultLabelUser struct for testing default label generation
+type TestDefaultLabelUser struct {
+	Username string `cypher:"username"`
+}
+
+func TestParseEntityWithMultipleLabels(t *testing.T) {
+	user := &TestUser{Username: "test", Email: "test@example.com"}
+	entityInfo, err := builder.ParseEntity(user)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, entityInfo)
+	assert.Contains(t, entityInfo.Labels.ToStrings(), "TestUser")
+	assert.Contains(t, entityInfo.Labels.ToStrings(), "Active")
+	assert.Equal(t, 2, len(entityInfo.Labels))
+}
+
+func TestParseEntityWithDefaultLabel(t *testing.T) {
+	user := &TestDefaultLabelUser{Username: "test"}
+	entityInfo, err := builder.ParseEntity(user)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, entityInfo)
+	assert.Contains(t, entityInfo.Labels.ToStrings(), "TestDefaultLabelUser")
+	assert.Equal(t, 1, len(entityInfo.Labels))
+}
 
 func TestSetEntity(t *testing.T) {
 	qb := builder.NewQueryBuilder()
 	user := &User{Username: "test", Email: "test@example.com"}
-	
+
 	res, err := qb.Match(user).As("u").
 		SetEntity(user, "u").
 		Build()

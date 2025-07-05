@@ -30,9 +30,32 @@ func TestQueryBuilder(t *testing.T) {
 			"email_2":    "test@example.com",
 			"username_3": "testuser",
 		}
-		
+
 		if len(result.Parameters) != len(expectedParams) {
 			t.Errorf("unexpected number of parameters: got %d, want %d", len(result.Parameters), len(expectedParams))
+		}
+	})
+
+	t.Run("Create Entity with Default Label", func(t *testing.T) {
+		type NoLabelUser struct {
+			Name string `cypher:"name"`
+		}
+		user := &NoLabelUser{Name: "defaultUser"}
+		result, err := builder.NewQueryBuilder().
+			Create(user).As("u").
+			Return("u").
+			Build()
+
+		if err != nil {
+			t.Fatalf("Build() failed: %v", err)
+		}
+
+		if !strings.Contains(result.Query, "CREATE (u:NoLabelUser {name: $name_1})") || !strings.Contains(result.Query, "RETURN u") {
+			t.Errorf("unexpected query structure for default label: %s", result.Query)
+		}
+
+		if result.Parameters["name_1"] != "defaultUser" {
+			t.Errorf("unexpected parameter for default label user: got %v, want %s", result.Parameters["name_1"], "defaultUser")
 		}
 	})
 }
@@ -66,4 +89,3 @@ func TestQueryBuilder_Set(t *testing.T) {
 		}
 	})
 }
-
