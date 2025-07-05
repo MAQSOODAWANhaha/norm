@@ -50,7 +50,7 @@ func TestWhereClauseOperators(t *testing.T) {
 			t.Fatalf("Build failed: %v", err)
 		}
 
-		expectedQuery := "MATCH (n:Person)\nWHERE n.name STARTS WITH $n_name AND n.name ENDS WITH $n_name AND n.name CONTAINS $n_name AND n.status IN $n_status_list\nRETURN n"
+		expectedQuery := "MATCH (n:Person)\nWHERE (n.name STARTS WITH $n_name_1) AND (n.name ENDS WITH $n_name_2) AND (n.name CONTAINS $n_name_3) AND (n.status IN $n_status_list_4)\nRETURN n"
 		if result.Query != expectedQuery {
 			t.Errorf("Expected query '%s', but got '%s'", expectedQuery, result.Query)
 		}
@@ -93,6 +93,3 @@ func TestOrderBySkipLimitClauses(t *testing.T) {
 		}
 	})
 }
-
-
-

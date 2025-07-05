@@ -219,7 +219,9 @@ func (q *cypherQueryBuilder) Where(conditions ...types.Condition) QueryBuilder {
 	var conditionParts []string
 	for _, cond := range conditions {
 		var sb strings.Builder
+		sb.WriteString("(")
 		q.buildConditionString(cond, &sb)
+		sb.WriteString(")")
 		conditionParts = append(conditionParts, sb.String())
 	}
 
@@ -643,7 +645,8 @@ func (q *cypherQueryBuilder) buildConditionString(condition types.Condition, sb 
 }
 
 func (q *cypherQueryBuilder) generateParameterName(base string) string {
-	return strings.ReplaceAll(base, ".", "_")
+	q.paramCounter++
+	return fmt.Sprintf("%s_%d", strings.ReplaceAll(base, ".", "_"), q.paramCounter)
 }
 
 func (q *cypherQueryBuilder) formatExpressions(distinct bool, expressions ...interface{}) string {
@@ -655,17 +658,13 @@ func (q *cypherQueryBuilder) formatExpressions(distinct bool, expressions ...int
 		case Expression:
 			parts = append(parts, v.String())
 		case types.Entity:
-			if v.Alias != "" {
-				parts = append(parts, v.Alias)
-			} else {
-				// Fallback to parsing the struct if no alias is provided
-				props, err := ParseEntityForReturn(v.Struct, "")
-				if err != nil {
-					q.errors = append(q.errors, err)
-					continue
-				}
-				parts = append(parts, props...)
+			// Always parse entity properties for return/with clauses
+			props, err := ParseEntityForReturn(v.Struct, v.Alias)
+			if err != nil {
+				q.errors = append(q.errors, err)
+				continue
 			}
+			parts = append(parts, props...)
 		default:
 			parts = append(parts, fmt.Sprintf("%v", v))
 		}

@@ -46,7 +46,7 @@ func ParseEntity(entity interface{}) (*EntityInfo, error) {
 			continue
 		}
 
-		tag := field.Tag.Get("norm")
+		tag := field.Tag.Get("cypher")
 		if tag == "" || tag == "-" {
 			continue
 		}
@@ -95,7 +95,7 @@ func ParseEntityForUpdate(entity interface{}) (map[string]interface{}, error) {
 			continue
 		}
 
-		tag := field.Tag.Get("norm")
+		tag := field.Tag.Get("cypher")
 		if tag == "" || tag == "-" {
 			continue
 		}
@@ -141,7 +141,7 @@ func ParseEntityForReturn(entity interface{}, alias string) ([]string, error) {
 			continue
 		}
 
-		tag := field.Tag.Get("norm")
+		tag := field.Tag.Get("cypher")
 		if tag == "" || tag == "-" {
 			continue
 		}
@@ -165,7 +165,7 @@ func parseLabels(typ reflect.Type) types.Labels {
 	var labels types.Labels
 
 	if field, ok := typ.FieldByName("_"); ok {
-		tag := field.Tag.Get("norm")
+		tag := field.Tag.Get("cypher")
 		if strings.HasPrefix(tag, "label:") {
 			labelStr := strings.TrimPrefix(tag, "label:")
 			parts := strings.Split(labelStr, ",")

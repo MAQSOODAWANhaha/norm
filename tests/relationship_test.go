@@ -225,7 +225,7 @@ func TestAdvancedQueryStructures(t *testing.T) {
 			t.Fatalf("Error building query: %v", err)
 		}
 
-		expectedQuery := `MERGE (u:User {email: $email, username: $username})
+		expectedQuery := `MERGE (u:User {email: $email_1, username: $username_2})
 ON CREATE SET u.created = timestamp(), u.status = 'new'
 ON MATCH SET u.lastSeen = timestamp(), u.status = 'active'
 RETURN u`
@@ -253,7 +253,7 @@ RETURN u`
 			t.Error("Query should contain UNWIND clause")
 		}
 
-		if result.Parameters["list"] == nil {
+		if result.Parameters["list_1"] == nil {
 			t.Error("Query should have parameterized list")
 		}
 
